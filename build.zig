@@ -21,6 +21,12 @@ pub fn build(b: *std.Build) void {
     // target and optimize options) will be listed when running `zig build --help`
     // in this directory.
 
+    // Add vaxis dependency
+    const vaxis_dep = b.dependency("vaxis", .{
+        .target = target,
+        .optimize = optimize,
+    });
+
     // This creates a module, which represents a collection of source files alongside
     // some compilation options, such as optimization mode and linked system libraries.
     // Zig modules are the preferred way of making Zig code available to consumers.
@@ -39,6 +45,10 @@ pub fn build(b: *std.Build) void {
         // Later on we'll use this module as the root module of a test executable
         // which requires us to specify a target.
         .target = target,
+        .optimize = optimize,
+        .imports = &.{
+            .{ .name = "vaxis", .module = vaxis_dep.module("vaxis") },
+        },
     });
 
     // Here we define an executable. An executable needs to have a root module
@@ -79,6 +89,7 @@ pub fn build(b: *std.Build) void {
                 // can be extremely useful in case of collisions (which can happen
                 // importing modules from different packages).
                 .{ .name = "ghretty", .module = mod },
+                .{ .name = "vaxis", .module = vaxis_dep.module("vaxis") },
             },
         }),
     });
