@@ -75,7 +75,7 @@ pub const GitHubClient = struct {
         var parsed = try std.json.parseFromSlice(std.json.Value, self.allocator, json_str, .{});
         defer parsed.deinit();
 
-        var prs = std.ArrayList(PR).init(self.allocator);
+        var prs = std.ArrayList(*PR){};//.init(self.allocator);
         errdefer {
             for (prs.items) |*pr| {
                 pr.deinit(self.allocator);
