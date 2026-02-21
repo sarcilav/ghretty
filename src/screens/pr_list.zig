@@ -6,23 +6,27 @@ const GitHubClient = @import("../github/client.zig").GitHubClient;
 
 pub const PRListScreen = struct {
     base: Screen,
+    allocator: std.mem.Allocator,
     github_client: *GitHubClient,
     prs: std.ArrayList(PR),
     selected_index: usize = 0,
     offset: usize = 0,
     loading: bool = true,
     err_msg: ?[]const u8 = null,
+    
+    pub fn create(allocator: std.mem.Allocator) !*Screen {
+        const self = try allocator.create(@This());
 
-    pub fn init(allocator: std.mem.Allocator, vx: *vaxis.Vaxis) !@This() {
-        const screen = try Screen.init(@This(), allocator, vx);
         const github_client = try allocator.create(GitHubClient);
 
         github_client.* = GitHubClient.init(allocator);
         defer allocator.destroy(github_client);
+
         const prs = std.ArrayList(PR){};//.init(allocator);
-        
-        return @This(){
-            .base = screen,
+
+        self.* = .{
+            .base = .{ .vtable = &vtable },
+            .allocator = allocator,
             .github_client = github_client,
             .prs = prs,
             .selected_index = 0,
@@ -30,41 +34,56 @@ pub const PRListScreen = struct {
             .loading = true,
             .err_msg = null,
         };
+
+        return self.base;
     }
 
-    pub fn deinit(self: *@This()) void {
+    fn deinit(screen: *Screen) void {
+        const self = fromBase(screen);
+
         for (self.prs.items) |*pr| {
-            pr.deinit(self.base.allocator);
+            pr.deinit(self.allocator);
         }
         self.prs.deinit();
-        self.base.allocator.destroy(self.github_client);
-        self.base.deinit();
+        self.allocator.destroy(self.github_client);
+        self.allocator.destroy(self);
     }
 
-    pub fn handleInput(self: *@This(), key: vaxis.Key) !void {
+    fn handleInput(screen: *Screen, key: vaxis.Key) !void {
+        const self = fromBase(screen);
+
         std.debug.print("debug(pr_list): handleInput\r\n", .{});
         if (self.loading) return;
-        
-        if (key.matches(vaxis.Key.tty_key, .{ .codepoint = 'j' })) {
-            if (self.selected_index < self.prs.items.len - 1) {
-                self.selected_index += 1;
-            }
-        } else if (key.matches(vaxis.Key.tty_key, .{ .codepoint = 'k' })) {
-            if (self.selected_index > 0) {
-                self.selected_index -= 1;
-            }
-        } else if (key.matches(vaxis.Key.tty_key, .{ .codepoint = '\r' })) {
-            if (self.prs.items.len > 0) {
-                std.debug.print("Opening PR #{}\n", .{self.prs.items[self.selected_index].number});
-            }
-        } else if (key.matches(vaxis.Key.tty_key, .{ .codepoint = 'r' })) {
-            self.loading = true;
-            self.err_msg = null;
-            try self.loadPRs();
+
+        switch(key.codepoint){
+            'j' => {
+                if (self.selected_index < self.prs.items.len - 1) {
+                    self.selected_index += 1;
+                }
+            },
+            'k' => {
+                if (self.selected_index > 0) {
+                    self.selected_index -= 1;
+                }
+            },
+            'r' => {
+                self.loading = true;
+                self.err_msg = null;
+                try self.loadPRs();                
+            },
+            else => {
+                if(key.matches(vaxis.Key.enter, .{})) {
+                    if (self.prs.items.len > 0) {
+                        std.debug.print("Opening PR #{}\n", .{self.prs.items[self.selected_index].number});
+                    }
+                }
+            },
         }
     }
 
-    pub fn update(self: *@This()) !void {
+    fn update(screen: *Screen) !void {
+        const self = fromBase(screen);
+
         if (self.loading) {
             try self.loadPRs();
         }
@@ -75,7 +94,7 @@ pub const PRListScreen = struct {
         
         // Clear existing PRs
         for (self.prs.items) |*pr| {
-            pr.deinit(self.base.allocator);
+            pr.deinit(self.allocator);
         }
         self.prs.clearRetainingCapacity();
         
@@ -96,7 +115,9 @@ pub const PRListScreen = struct {
         self.offset = 0;
     }
 
-    pub fn render(self: *@This(), window: vaxis.Window) !void {
+    fn render(screen: *Screen, window: vaxis.Window) !void {
+        const self = fromBase(screen);
+
         _ = @import("../tui/theme.zig");
         
         // Clear screen
@@ -206,4 +227,15 @@ pub const PRListScreen = struct {
         try footer.setCursor(.{ .row = 0, .col = 0 });
         try footer.print("j/k: navigate • Enter: open • r: refresh • q: quit", .{});
     }
+
+    fn fromBase(screen: *Screen) *@This() {
+        return @fieldParentPtr("base", screen);
+    }
+
+    const vtable = Screen.VTable{
+        .handleInput = handleInput,
+        .update = update,
+        .render = render,
+        .deinit = deinit,
+    };
 };

@@ -2,35 +2,28 @@ const std = @import("std");
 const vaxis = @import("vaxis");
 
 pub const Screen = struct {
-    allocator: std.mem.Allocator,
-    vx: *vaxis.Vaxis,
+    vtable: *VTable,
 
-    pub fn init(comptime T: type, allocator: std.mem.Allocator, vx: *vaxis.Vaxis) !T{
-        return T{
-            .allocator = allocator,
-            .vx = vx,
-        };
+    pub const VTable = struct {
+        handleInput: *const fn(self: *@This(), key: vaxis.Key) anyerror!void,
+        update: *const fn(self: *@This()) anyerror!void,
+        render: *const fn(self: *@This(), window: vaxis.Window) anyerror!void,
+        deinit: *const fn(self: *@This()) void,
+    };
+
+    pub fn deinit(self: *@This()) void {
+        self.vtable.deinit(self);
     }
 
-    pub fn deinit(comptime T: type, self: *T) void {
-        _ = self;
+    pub fn handleInput(self: *@This(), key: vaxis.Key) anyerror!void {
+        try self.vtable.handleInput(self, key);
     }
 
-    pub fn handleInput(comptime T: type, self: *T, key: vaxis.Key) !void {
-        std.debug.print("debug(generic screen): handleInput\r\n", .{});
-        _ = self;
-        _ = key;
-        // TODO: Implement in derived screens
+    pub fn update(self: *@This()) anyerror!void {
+        try self.vtable.update(self);
     }
 
-    pub fn update(comptime T: type, self: *T) !void {
-        _ = self;
-        // TODO: Implement in derived screens
-    }
-
-    pub fn render(comptime T: type, self: *T, window: vaxis.Window) !void {
-        _ = self;
-        _ = window;
-        // TODO: Implement in derived screens
-    }
+    pub fn render(self: *@This(), window: vaxis.Window) anyerror!void {
+        try self.vtable.render(self, window);
+    }    
 };

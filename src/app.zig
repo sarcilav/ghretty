@@ -33,7 +33,7 @@ pub const App = struct {
         var screen_stack = std.ArrayListUnmanaged(*Screen){};
         
         // Create initial screen
-        const pr_list_screen = try allocator.create(PRListScreen);
+        const pr_list_screen = try PRListScreen.create(allocator);
         defer allocator.destroy(pr_list_screen);
         pr_list_screen.* = try PRListScreen.init(allocator, &vx);
         
