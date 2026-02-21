@@ -31,16 +31,28 @@ pub const GitHubClient = struct {
     }
 
     fn runGhCommand(self: *@This(), args: []const []const u8) ![]const u8 {
-        var process = std.ChildProcess.init(args, self.allocator);
-        process.argv = &.{"gh"} ++ args;
+        var process = std.process.Child.init(args, self.allocator);
+
+        const argv = try self.allocator.alloc([] const u8, args.len + 1);
+        defer self.allocator.free(argv);
+        argv[0] = "gh";
+        @memcpy(argv[1..], args);
+        process.argv = argv;
+
         process.stdout_behavior = .Pipe;
         process.stderr_behavior = .Pipe;
 
         try process.spawn();
 
-        const stdout = try process.stdout.?.reader().readAllAlloc(self.allocator, std.math.maxInt(usize));
-        const stderr = try process.stderr.?.reader().readAllAlloc(self.allocator, std.math.maxInt(usize));
-        defer self.allocator.free(stderr);
+        const stdout = try process.stdout.?.readToEndAlloc(
+            self.allocator,
+            std.math.maxInt(usize),
+        );
+
+        const stderr = try process.stderr.?.readToEndAlloc(
+            self.allocator,
+            std.math.maxInt(usize),
+        );
 
         const term = try process.wait();
         switch (term) {
