@@ -1,7 +1,7 @@
 const std = @import("std");
-const PR = @import("ghretty").models.PR;
-const PRState = @import("ghretty").models.PRState;
-const FileChange = @import("ghretty").models.FileChange;
+const PR = @import("../models/pr.zig").PR;
+const PRState = @import("../models/pr.zig").PRState;
+const FileChange = @import("../models/pr.zig").FileChange;
 
 pub const GitHubClient = struct {
     allocator: std.mem.Allocator,
