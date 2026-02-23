@@ -35,9 +35,8 @@ pub const App = struct {
         // Create initial screen
         const pr_list_screen = try PRListScreen.create(allocator);
         defer allocator.destroy(pr_list_screen);
-        pr_list_screen.* = try PRListScreen.init(allocator, &vx);
-        
-        try screen_stack.append(allocator, &pr_list_screen.base);
+                
+        try screen_stack.append(allocator, pr_list_screen);
 
         var loop: vaxis.Loop(Event) = .{
             .tty = &tty,
@@ -50,7 +49,7 @@ pub const App = struct {
             .vx = vx,
             .tty_buf = buf,
             .tty = tty,
-            .current_screen = &pr_list_screen.base,
+            .current_screen = pr_list_screen,
             .screen_stack = screen_stack,
             .loop = loop,
         };

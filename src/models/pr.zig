@@ -28,7 +28,7 @@ pub const PR = struct {
             for (files.items) |*file| {
                 file.deinit(allocator);
             }
-            files.deinit();
+            files.deinit(allocator);
         }
     }
 };

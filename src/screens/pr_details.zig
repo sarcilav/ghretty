@@ -8,8 +8,8 @@ pub const PRDetailsScreen = struct {
     pr: PR,
     scroll_offset: usize = 0,
 
-    pub fn init(allocator: std.mem.Allocator, vx: *vaxis.Vaxis, pr: PR) !@This() {
-        const screen = try Screen.init(allocator, vx);
+    pub fn init(allocator: std.mem.Allocator, pr: PR) !@This() {
+        const screen = try Screen.init(allocator);
         return @This(){
             .base = screen,
             .pr = pr,

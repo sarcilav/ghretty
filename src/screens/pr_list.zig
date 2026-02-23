@@ -35,7 +35,7 @@ pub const PRListScreen = struct {
             .err_msg = null,
         };
 
-        return self.base;
+        return &self.base;
     }
 
     fn deinit(screen: *Screen) void {
@@ -44,7 +44,7 @@ pub const PRListScreen = struct {
         for (self.prs.items) |*pr| {
             pr.deinit(self.allocator);
         }
-        self.prs.deinit();
+        self.prs.deinit(self.allocator);
         self.allocator.destroy(self.github_client);
         self.allocator.destroy(self);
     }
@@ -109,7 +109,7 @@ pub const PRListScreen = struct {
         };
         
         // Transfer ownership
-        self.prs.deinit();
+        self.prs.deinit(self.allocator);
         self.prs = fetched_prs;
         self.selected_index = 0;
         self.offset = 0;

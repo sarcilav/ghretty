@@ -75,12 +75,12 @@ pub const GitHubClient = struct {
         var parsed = try std.json.parseFromSlice(std.json.Value, self.allocator, json_str, .{});
         defer parsed.deinit();
 
-        var prs = std.ArrayList(*PR){};//.init(self.allocator);
+        var prs = std.ArrayList(PR){};
         errdefer {
             for (prs.items) |*pr| {
                 pr.deinit(self.allocator);
             }
-            prs.deinit();
+            prs.deinit(self.allocator);
         }
 
         if (parsed.value != .array) {
@@ -89,7 +89,7 @@ pub const GitHubClient = struct {
 
         for (parsed.value.array.items) |item| {
             const pr = try self.parsePRFromJson(item);
-            try prs.append(pr);
+            try prs.append(self.allocator, pr);
         }
 
         return prs;
@@ -151,7 +151,7 @@ pub const GitHubClient = struct {
         // Parse files if present
         if (obj.get("files")) |files_val| {
             if (files_val == .array) {
-                var files = std.ArrayList(FileChange).init(self.allocator);
+                var files = std.ArrayList(FileChange){};//.init(self.allocator);
                 for (files_val.array.items) |file_item| {
                     const file_obj = file_item.object;
                     
@@ -171,12 +171,12 @@ pub const GitHubClient = struct {
                         @as(u32, @intCast(@as(i64, @intCast(c.integer)))) 
                     else 0;
                     
-                    try files.append(FileChange{
+                    try files.append(self.allocator, FileChange{
                         .path = path,
                         .additions = additions,
                         .deletions = deletions,
                         .changes = changes,
-                    });
+                        });
                 }
                 pr.files = files;
             }
