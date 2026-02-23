@@ -34,7 +34,7 @@ pub const App = struct {
         
         // Create initial screen
         const pr_list_screen = try PRListScreen.create(allocator);
-        defer allocator.destroy(pr_list_screen);
+        //defer allocator.destroy(pr_list_screen);
                 
         try screen_stack.append(allocator, pr_list_screen);
 
@@ -75,14 +75,12 @@ pub const App = struct {
 
         while (!self.should_quit) {
             const event = self.loop.nextEvent();
-            std.debug.print("\nDEBUG: next event\r\n", .{});   
             switch (event) {
                 .key_press => |key| {
                     if (key.matches('q', .{ .ctrl = true })) {
                         self.should_quit = true;
                         continue;
                     }
-                    std.debug.print("\n debug(app) calling handleinput with {}\n", .{key.codepoint});
                     try self.current_screen.handleInput(key);
                 },
                 .winsize => |ws| try self.vx.resize(self.allocator, self.tty.writer(), ws),
@@ -90,27 +88,14 @@ pub const App = struct {
                     std.debug.print("else", .{});
                 },
             }
-            std.debug.print("DEBUG: ready to update\n", .{});
+
             const win = self.vx.window();
             win.clear();
 
-            // Create a bordered child window
-            // const child = win.child(.{
-            //     .x_off = win.width / 2 - 20,
-            //     .y_off = win.height / 2 - 3,
-            //     .width = 40 ,
-            //     .height = 3 ,
-            //     .border = .{
-            //         .where = .all,
-            //         .style = style,
-            //     },
-            // });
             // Update
             try self.current_screen.update();
 
             // Render
-            // try self.vx.draw();
-            // try self.vx.render(self.tty.write());
             try self.current_screen.render(win);
         }
     }

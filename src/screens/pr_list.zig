@@ -3,6 +3,7 @@ const vaxis = @import("vaxis");
 const Screen = @import("screen.zig").Screen;
 const PR = @import("../models/pr.zig").PR;
 const GitHubClient = @import("../github/client.zig").GitHubClient;
+const layout = @import("../tui/layout.zig");
 
 pub const PRListScreen = struct {
     base: Screen,
@@ -20,9 +21,8 @@ pub const PRListScreen = struct {
         const github_client = try allocator.create(GitHubClient);
 
         github_client.* = GitHubClient.init(allocator);
-        defer allocator.destroy(github_client);
 
-        const prs = std.ArrayList(PR){};//.init(allocator);
+        const prs = std.ArrayList(PR){};
 
         self.* = .{
             .base = .{ .vtable = &vtable },
@@ -122,110 +122,119 @@ pub const PRListScreen = struct {
         
         // Clear screen
         window.clear();
+        const w = window.width;
+        const h = window.height;
+
+        // --- Header ---
+        var header = window.child(layout.rect(
+            0,
+            0,
+            w,
+            3,
+        ));
+
+        // --- Footer ---
+        var footer = window.child(layout.rect(
+            h - 1,
+            0,
+            w,
+            1,
+        ));
+
+        // --- Body ---
+        var body = window.child(layout.rect(
+            0,
+            3,
+            w,
+            h - 4,
+        ));
+       
+        // =====================
+        // Header
+        // =====================
+        _ = header.print(&.{
+            .{
+                .text = "GitHub PR Visualizer",
+            },
+            }, .{});
+
+        _ = header.print(&.{
+            .{
+                .text = "\nPress r: refresh  ctrl-q: quit",
+            },
+            }, .{});       
         
-        // Draw header
-        var header = window.child(.{
-            .direction = .horizontal,
-            .height = 3,
-        });
         
-        try header.setCursor(.{ .row = 0, .col = 0 });
-        try header.print("GitHub PR Visualizer", .{});
-        
-        try header.setCursor(.{ .row = 1, .col = 0 });
-        try header.print("Press 'r' to refresh, 'q' to quit", .{});
-        
+        // =====================
+        // Loading state
+        // =====================
         if (self.loading) {
-            var loading_window = window.child(.{
-                .direction = .vertical,
-                .margin = .{ .top = 3 },
-            });
-            try loading_window.setCursor(.{ .row = 0, .col = 0 });
-            try loading_window.print("Loading PRs...", .{});
+            _ = body.print(&.{
+                .{ .text = "Loading PRs..." },
+                }, .{});
             return;
         }
-        
+
+        // =====================
+        // Error state
+        // =====================
         if (self.err_msg) |err| {
-            var error_window = window.child(.{
-                .direction = .vertical,
-                .margin = .{ .top = 3 },
-            });
-            try error_window.setCursor(.{ .row = 0, .col = 0 });
-            try error_window.print("Error: {s}", .{err});
-            try error_window.setCursor(.{ .row = 1, .col = 0 });
-            try error_window.print("Press 'r' to retry", .{});
+            _ = body.print(&.{
+                .{ .text = "Error: " },
+                .{ .text = err },
+                }, .{});
             return;
         }
-        
-        // Draw PR list
-        var list_window = window.child(.{
-            .direction = .vertical,
-            .margin = .{ .top = 3 },
-        });
-        
+
+        // =====================
+        // PR List
+        // =====================
         if (self.prs.items.len == 0) {
-            try list_window.setCursor(.{ .row = 0, .col = 0 });
-            try list_window.print("No pull requests found.", .{});
+            _ = body.print(&.{
+                .{ .text = "No pull requests found." },
+                }, .{});
             return;
         }
+
+        const visible = @min(
+            self.prs.items.len -| self.offset,
+            body.height,
+        );
         
-        const visible_height = @min(self.prs.items.len - self.offset, list_window.rows());
-        
-        for (0..visible_height) |i| {
-            const pr_index = self.offset + i;
-            const pr = self.prs.items[pr_index];
-            
-            var row = list_window.child(.{
-                .direction = .horizontal,
-                .height = 1,
-                .margin = .{ .top = @as(u16, @intCast(i)) },
+        for (0..visible) |i| {
+            const idx = self.offset + i;
+            const pr = self.prs.items[idx];
+
+            const selected = idx == self.selected_index;
+
+            const style = if (selected) vaxis.Style{
+                .fg = try vaxis.Color.rgbFromSpec("rgb:00/00/00"),
+                .bg = try vaxis.Color.rgbFromSpec("rgb:FF/FF/FF"),
+                .bold = true,
+            } else vaxis.Style{};
+
+            const line = try std.fmt.allocPrint(
+                self.allocator,
+                "#{d} {s} @{s}",
+                .{ pr.number, pr.title, pr.author },
+            );
+            defer self.allocator.free(line);
+
+            _ = body.printSegment(.{
+                .text = line,
+                .style = style,
+                }, .{
+            //    .x = @intCast(i),
+              //  .y = 0,
             });
-            
-            // Highlight selected row
-            if (pr_index == self.selected_index) {
-                row.setStyle(.{
-                    .fg = vaxis.Color.ansi(.black),
-                    .bg = vaxis.Color.ansi(.white),
-                    .bold = true,
-                });
-            }
-            
-            // PR number
-            try row.setCursor(.{ .row = 0, .col = 0 });
-            try row.print("#{}", .{pr.number});
-            
-            // Status indicators
-            try row.setCursor(.{ .row = 0, .col = 8 });
-            if (pr.is_draft) {
-                try row.print("[DRAFT]", .{});
-            }
-            if (pr.review_requested) {
-                try row.print("[REVIEW]", .{});
-            }
-            
-            // Title
-            try row.setCursor(.{ .row = 0, .col = 20 });
-            const max_title_width = 40;
-            if (pr.title.len > max_title_width) {
-                try row.print("{s}...", .{pr.title[0..max_title_width]});
-            } else {
-                try row.print("{s}", .{pr.title});
-            }
-            
-            // Author
-            try row.setCursor(.{ .row = 0, .col = 65 });
-            try row.print("@{s}", .{pr.author});
         }
         
-        // Draw footer
-        var footer = window.child(.{
-            .direction = .horizontal,
-            .margin = .{ .top = list_window.rows() + 3 },
-            .height = 1,
-        });
-        
-        try footer.setCursor(.{ .row = 0, .col = 0 });
-        try footer.print("j/k: navigate • Enter: open • r: refresh • q: quit", .{});
+        // =====================
+        // Footer
+        // =====================       
+        _ = footer.print(&.{
+            .{ .text = "j/k: navigate • Enter: open • r: refresh • q: quit" },
+            }, .{});
     }
 
     fn fromBase(screen: *Screen) *@This() {
