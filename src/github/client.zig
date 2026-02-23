@@ -39,8 +39,21 @@ pub const GitHubClient = struct {
         @memcpy(argv[1..], args);
         process.argv = argv;
 
+        process.stdin_behavior = .Pipe;
         process.stdout_behavior = .Pipe;
         process.stderr_behavior = .Pipe;
+
+        var env = try std.process.getEnvMap(self.allocator);
+        defer env.deinit();
+        try env.put("TERM", "dumb");
+        try env.put("GIT_PAGER", "cat");
+        try env.put("PAGER", "cat");
+        try env.put("GH_PAGER", "cat");
+        try env.put("GH_FORCE_TTY", "0");
+        try env.put("NO_COLOR", "1");
+        try env.put("CLICOLOR", "0");
+
+        process.env_map = &env;
 
         try process.spawn();
 
@@ -67,14 +80,12 @@ pub const GitHubClient = struct {
                 return error.GhCommandFailed;
             },
         }
-
         return stdout;
     }
 
     fn parsePRList(self: *@This(), json_str: []const u8) !std.ArrayList(PR) {
-        var parsed = try std.json.parseFromSlice(std.json.Value, self.allocator, json_str, .{});
+        var parsed = try std.json.parseFromSlice(std.json.Value, self.allocator, json_str, .{ .allocate = .alloc_if_needed});
         defer parsed.deinit();
-
         var prs = std.ArrayList(PR){};
         errdefer {
             for (prs.items) |*pr| {

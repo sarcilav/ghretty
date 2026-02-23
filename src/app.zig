@@ -63,7 +63,7 @@ pub const App = struct {
         self.screen_stack.deinit(self.allocator);
         self.vx.deinit(self.allocator, self.tty.writer());
         self.tty.deinit();
-        self.current_screen.deinit();
+        //self.current_screen.deinit(); it is deinit as part of the stack
     }
 
     pub fn run(self: *@This()) !void {
@@ -97,6 +97,7 @@ pub const App = struct {
 
             // Render
             try self.current_screen.render(win);
+            try self.vx.render(self.tty.writer());
         }
     }
 

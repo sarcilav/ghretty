@@ -52,7 +52,6 @@ pub const PRListScreen = struct {
     fn handleInput(screen: *Screen, key: vaxis.Key) !void {
         const self = fromBase(screen);
 
-        std.debug.print("debug(pr_list): handleInput\r\n", .{});
         if (self.loading) return;
 
         switch(key.codepoint){
@@ -205,28 +204,18 @@ pub const PRListScreen = struct {
             const idx = self.offset + i;
             const pr = self.prs.items[idx];
 
-            const selected = idx == self.selected_index;
-
-            const style = if (selected) vaxis.Style{
-                .fg = try vaxis.Color.rgbFromSpec("rgb:00/00/00"),
-                .bg = try vaxis.Color.rgbFromSpec("rgb:FF/FF/FF"),
-                .bold = true,
-            } else vaxis.Style{};
+            //const selected = idx == self.selected_index;
 
             const line = try std.fmt.allocPrint(
                 self.allocator,
                 "#{d} {s} @{s}",
                 .{ pr.number, pr.title, pr.author },
             );
-            defer self.allocator.free(line);
-
-            _ = body.printSegment(.{
-                .text = line,
-                .style = style,
-                }, .{
-            //    .x = @intCast(i),
-              //  .y = 0,
-            });
+            //defer self.allocator.free(line);
+            std.debug.print("debug line {s}\r\n", .{line});
+            _ = body.print(&.{
+                .{ .text = line },
+                }, .{});
         }
         
         // =====================
