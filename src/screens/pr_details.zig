@@ -42,11 +42,8 @@ pub const PRDetailsScreen = struct {
             .height = 3,
         });
         
-        try header.setCursor(.{ .row = 0, .col = 0 });
-        try header.print("PR #{}: {s}", .{ self.pr.number, self.pr.title });
-        
-        try header.setCursor(.{ .row = 1, .col = 0 });
-        try header.print("Author: @{s}", .{self.pr.author});
+        _ = header.print("PR #{}: {s}", .{ self.pr.number, self.pr.title });
+        _ = header.print("\nAuthor: @{s}", .{self.pr.author});
         
         // TODO: Draw PR description and file changes
         var content = window.child(.{
@@ -54,8 +51,7 @@ pub const PRDetailsScreen = struct {
             .margin = .{ .top = 4 },
         });
         
-        try content.setCursor(.{ .row = 0, .col = 0 });
-        try content.print("PR Details Screen - TODO: Implement", .{});
+        _ = content.print("PR Details Screen - TODO: Implement", .{});
         
         // Draw footer
         var footer = window.child(.{
@@ -64,7 +60,6 @@ pub const PRDetailsScreen = struct {
             .height = 1,
         });
         
-        try footer.setCursor(.{ .row = 0, .col = 0 });
-        try footer.print("j/k: scroll • q: back", .{});
+        _ = footer.print("j/k: scroll • q: back", .{});
     }
 };
