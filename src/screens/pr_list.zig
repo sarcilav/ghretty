@@ -14,12 +14,14 @@ pub const PRListScreen = struct {
     offset: usize = 0,
     loading: bool = true,
     err_msg: ?[]const u8 = null,
+    lines: std.ArrayListUnmanaged([]u8),
     
     pub fn create(allocator: std.mem.Allocator) !*Screen {
         const self = try allocator.create(@This());
 
         const github_client = try allocator.create(GitHubClient);
 
+        const lines = std.ArrayListUnmanaged([]u8){};
         github_client.* = GitHubClient.init(allocator);
 
         const prs = std.ArrayList(PR){};
@@ -33,6 +35,7 @@ pub const PRListScreen = struct {
             .offset = 0,
             .loading = true,
             .err_msg = null,
+            .lines = lines,
         };
 
         return &self.base;
@@ -44,6 +47,12 @@ pub const PRListScreen = struct {
         for (self.prs.items) |*pr| {
             pr.deinit(self.allocator);
         }
+
+        for (self.lines.items) |line| {
+            self.allocator.free(line);
+        }
+        self.lines.deinit(self.allocator);
+
         self.prs.deinit(self.allocator);
         self.allocator.destroy(self.github_client);
         self.allocator.destroy(self);
@@ -199,25 +208,27 @@ pub const PRListScreen = struct {
             self.prs.items.len -| self.offset,
             body.height,
         );
-        
+
         for (0..visible) |i| {
             const idx = self.offset + i;
             const pr = self.prs.items[idx];
 
             //const selected = idx == self.selected_index;
-
             const line = try std.fmt.allocPrint(
                 self.allocator,
                 "#{d} {s} @{s}",
                 .{ pr.number, pr.title, pr.author },
             );
-            //defer self.allocator.free(line);
-            std.debug.print("debug line {s}\r\n", .{line});
+            const valid = std.unicode.utf8ValidateSlice(line);
+            std.debug.assert(valid);
+
+            try self.lines.append(self.allocator, line);
+
             _ = body.print(&.{
                 .{ .text = line },
                 }, .{});
         }
-        
+
         // =====================
         // Footer
         // =====================       
