@@ -70,7 +70,7 @@ pub const App = struct {
         // reading user input
         try self.loop.start();
         defer self.loop.stop();
-        //try self.vx.queryTerminal(self.tty.writer(), 1 * std.time.ns_per_s);
+        try self.vx.queryTerminal(self.tty.writer(), 1 * std.time.ns_per_s);
 
         while (!self.should_quit) {
             const event = self.loop.nextEvent();
