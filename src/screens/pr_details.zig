@@ -35,31 +35,31 @@ pub const PRDetailsScreen = struct {
 
     pub fn render(self: *@This(), window: vaxis.Window) !void {
         window.clear();
-        
+
         // Draw header with PR info
         var header = window.child(.{
             .direction = .horizontal,
             .height = 3,
         });
-        
+
         _ = header.print("PR #{}: {s}", .{ self.pr.number, self.pr.title });
         _ = header.print("\nAuthor: @{s}", .{self.pr.author});
-        
+
         // TODO: Draw PR description and file changes
         var content = window.child(.{
             .direction = .vertical,
             .margin = .{ .top = 4 },
         });
-        
+
         _ = content.print("PR Details Screen - TODO: Implement", .{});
-        
+
         // Draw footer
         var footer = window.child(.{
             .direction = .horizontal,
             .margin = .{ .top = content.rows() + 4 },
             .height = 1,
         });
-        
+
         _ = footer.print("j/k: scroll • q: back", .{});
     }
 };

@@ -9,7 +9,7 @@ pub fn main() !void {
     // Initialize and run the TUI app
     var app = try ghretty.App.init(allocator);
     defer app.deinit();
-    
+
     try app.run();
 }
 

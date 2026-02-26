@@ -5,10 +5,10 @@ pub const Screen = struct {
     vtable: *const VTable,
 
     pub const VTable = struct {
-        handleInput: *const fn(self: *Screen, key: vaxis.Key) anyerror!void,
-        update: *const fn(self: *Screen) anyerror!void,
-        render: *const fn(self: *Screen, window: vaxis.Window) anyerror!void,
-        deinit: *const fn(self: *Screen) void,
+        handleInput: *const fn (self: *Screen, key: vaxis.Key) anyerror!void,
+        update: *const fn (self: *Screen) anyerror!void,
+        render: *const fn (self: *Screen, window: vaxis.Window) anyerror!void,
+        deinit: *const fn (self: *Screen) void,
     };
 
     pub fn deinit(self: *@This()) void {
@@ -25,5 +25,5 @@ pub const Screen = struct {
 
     pub fn render(self: *@This(), window: vaxis.Window) anyerror!void {
         try self.vtable.render(self, window);
-    }    
+    }
 };

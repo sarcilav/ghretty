@@ -31,10 +31,10 @@ pub const App = struct {
         errdefer vx.deinit(allocator, tty.writer());
 
         var screen_stack = std.ArrayListUnmanaged(*Screen){};
-        
+
         // Create initial screen
         const pr_list_screen = try PRListScreen.create(allocator);
-                
+
         try screen_stack.append(allocator, pr_list_screen);
 
         var loop: vaxis.Loop(Event) = .{
