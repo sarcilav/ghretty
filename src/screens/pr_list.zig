@@ -4,6 +4,7 @@ const Screen = @import("screen.zig").Screen;
 const PR = @import("../models/pr.zig").PR;
 const GitHubClient = @import("../github/client.zig").GitHubClient;
 const layout = @import("../tui/layout.zig");
+const theme = @import("../tui/theme.zig");
 
 pub const PRListScreen = struct {
     base: Screen,
@@ -15,7 +16,7 @@ pub const PRListScreen = struct {
     loading: bool = true,
     err_msg: ?[]const u8 = null,
     lines: std.ArrayListUnmanaged([]u8),
-    
+
     pub fn create(allocator: std.mem.Allocator) !*Screen {
         const self = try allocator.create(@This());
 
@@ -63,7 +64,7 @@ pub const PRListScreen = struct {
 
         if (self.loading) return;
 
-        switch(key.codepoint){
+        switch (key.codepoint) {
             'j' => {
                 if (self.selected_index < self.prs.items.len - 1) {
                     self.selected_index += 1;
@@ -77,10 +78,10 @@ pub const PRListScreen = struct {
             'r' => {
                 self.loading = true;
                 self.err_msg = null;
-                try self.loadPRs();                
+                try self.loadPRs();
             },
             else => {
-                if(key.matches(vaxis.Key.enter, .{})) {
+                if (key.matches(vaxis.Key.enter, .{})) {
                     if (self.prs.items.len > 0) {
                         std.debug.print("Opening PR #{}\n", .{self.prs.items[self.selected_index].number});
                     }
@@ -99,13 +100,13 @@ pub const PRListScreen = struct {
 
     fn loadPRs(self: *@This()) !void {
         defer self.loading = false;
-        
+
         // Clear existing PRs
         for (self.prs.items) |*pr| {
             pr.deinit(self.allocator);
         }
         self.prs.clearRetainingCapacity();
-        
+
         // Fetch new PRs
         const fetched_prs = self.github_client.fetchPRs() catch |err| {
             self.err_msg = switch (err) {
@@ -115,7 +116,7 @@ pub const PRListScreen = struct {
             };
             return;
         };
-        
+
         // Transfer ownership
         self.prs.deinit(self.allocator);
         self.prs = fetched_prs;
@@ -126,8 +127,6 @@ pub const PRListScreen = struct {
     fn render(screen: *Screen, window: vaxis.Window) !void {
         const self = fromBase(screen);
 
-        _ = @import("../tui/theme.zig");
-        
         // Clear screen
         window.clear();
         const w = window.width;
@@ -156,7 +155,7 @@ pub const PRListScreen = struct {
             w,
             h - 4,
         ));
-       
+
         // =====================
         // Header
         // =====================
@@ -164,22 +163,21 @@ pub const PRListScreen = struct {
             .{
                 .text = "GitHub PR Visualizer",
             },
-            }, .{});
+        }, .{});
 
         _ = header.print(&.{
             .{
                 .text = "\nPress r: refresh  ctrl-q: quit",
             },
-            }, .{});       
-        
-        
+        }, .{});
+
         // =====================
         // Loading state
         // =====================
         if (self.loading) {
             _ = body.print(&.{
                 .{ .text = "Loading PRs..." },
-                }, .{});
+            }, .{});
             return;
         }
 
@@ -190,7 +188,7 @@ pub const PRListScreen = struct {
             _ = body.print(&.{
                 .{ .text = "Error: " },
                 .{ .text = err },
-                }, .{});
+            }, .{});
             return;
         }
 
@@ -200,7 +198,7 @@ pub const PRListScreen = struct {
         if (self.prs.items.len == 0) {
             _ = body.print(&.{
                 .{ .text = "No pull requests found." },
-                }, .{});
+            }, .{});
             return;
         }
 
@@ -209,32 +207,55 @@ pub const PRListScreen = struct {
             body.height,
         );
 
+        // Clear existing lines
+        for (self.lines.items) |line| {
+            self.allocator.free(line);
+        }
+        self.lines.clearRetainingCapacity();
+
+        // Build segments array
+        var segments = std.ArrayList(vaxis.Segment){};
+        defer segments.deinit(self.allocator);
+
         for (0..visible) |i| {
             const idx = self.offset + i;
             const pr = self.prs.items[idx];
+            const is_selected = idx == self.selected_index;
 
-            //const selected = idx == self.selected_index;
+            // Create line text
             const line = try std.fmt.allocPrint(
                 self.allocator,
                 "#{d} {s} @{s}",
                 .{ pr.number, pr.title, pr.author },
             );
-            const valid = std.unicode.utf8ValidateSlice(line);
-            std.debug.assert(valid);
+            defer self.allocator.free(line);
 
-            try self.lines.append(self.allocator, line);
+            // Store for navigation
+            try self.lines.append(self.allocator, try self.allocator.dupe(u8, line));
 
-            _ = body.print(&.{
-                .{ .text = line },
-                }, .{});
+            // Create segment with appropriate style
+            const segment = vaxis.Segment{
+                .text = line,
+                .style = if (is_selected) theme.selected_row_style else theme.normal_style,
+            };
+
+            try segments.append(self.allocator, segment);
+
+            // Add newline segment (except after last line)
+            if (i < visible - 1) {
+                try segments.append(self.allocator, .{ .text = "\n", .style = theme.normal_style });
+            }
         }
+
+        // Print all segments at once
+        _ = body.print(segments.items, .{});
 
         // =====================
         // Footer
-        // =====================       
+        // =====================
         _ = footer.print(&.{
             .{ .text = "j/k: navigate • Enter: open • r: refresh • q: quit" },
-            }, .{});
+        }, .{});
     }
 
     fn fromBase(screen: *Screen) *@This() {

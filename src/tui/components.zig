@@ -17,23 +17,31 @@ pub const List = struct {
         const start_idx = self.scroll_offset;
         const end_idx = @min(start_idx + visible_height, self.items.len);
 
-        for (start_idx..end_idx, 0..) |idx, row| {
+        // Build text for all visible items
+        var full_text = std.ArrayList(u8).init(window.allocator);
+        defer full_text.deinit();
+
+        for (start_idx..end_idx) |idx| {
             const is_selected = idx == self.selected_index;
-            var item_window = window.child(.{
-                .direction = .horizontal,
-                .height = 1,
-                .margin = .{ .top = @as(u16, @intCast(row)) },
-            });
 
             if (is_selected) {
-                item_window.setStyle(.{
-                    .fg = vaxis.Color.ansi(.black),
-                    .bg = vaxis.Color.ansi(.white),
-                });
+                // Mark selected items with '>'
+                try full_text.appendSlice("> ");
+                try full_text.appendSlice(self.items[idx]);
+            } else {
+                try full_text.appendSlice("  ");
+                try full_text.appendSlice(self.items[idx]);
             }
 
-            try item_window.setCursor(.{ .row = 0, .col = 0 });
-            try item_window.print("{s}", .{self.items[idx]});
+            // Add newline except after last item
+            if (idx < end_idx - 1) {
+                try full_text.append('\n');
+            }
         }
+
+        // Print all text at once
+        _ = window.print(&.{
+            .{ .text = full_text.items },
+        }, .{});
     }
 };
