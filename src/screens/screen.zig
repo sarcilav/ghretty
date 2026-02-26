@@ -5,12 +5,16 @@ pub const Screen = struct {
     vtable: *const VTable,
 
     pub const VTable = struct {
+        navigateInto: *const fn (self: *Screen) anyerror!*Screen,
         handleInput: *const fn (self: *Screen, key: vaxis.Key) anyerror!void,
         update: *const fn (self: *Screen) anyerror!void,
         render: *const fn (self: *Screen, window: vaxis.Window) anyerror!void,
         deinit: *const fn (self: *Screen) void,
     };
 
+    pub fn navigateInto(self: *@This()) anyerror!*Screen {
+        return try self.vtable.navigateInto(self);
+    }
     pub fn deinit(self: *@This()) void {
         self.vtable.deinit(self);
     }

@@ -1,6 +1,7 @@
 const std = @import("std");
 const vaxis = @import("vaxis");
 const Screen = @import("screen.zig").Screen;
+const PRDetailsScreen = @import("pr_details.zig").PRDetailsScreen;
 const PR = @import("../models/pr.zig").PR;
 const GitHubClient = @import("../github/client.zig").GitHubClient;
 const layout = @import("../tui/layout.zig");
@@ -57,6 +58,16 @@ pub const PRListScreen = struct {
         self.prs.deinit(self.allocator);
         self.allocator.destroy(self.github_client);
         self.allocator.destroy(self);
+    }
+
+    pub fn navigateInto(screen: *Screen) !*Screen {
+        const self = fromBase(screen);
+
+        if (self.prs.items.len > 0) {
+            const pr_details_screen = try PRDetailsScreen.create(self.allocator, self.prs.items[self.selected_index]);
+            return pr_details_screen;
+        }
+        return &self.base;
     }
 
     fn handleInput(screen: *Screen, key: vaxis.Key) !void {
@@ -140,20 +151,20 @@ pub const PRListScreen = struct {
             3,
         ));
 
-        // --- Footer ---
-        var footer = window.child(layout.rect(
-            h - 1,
-            0,
-            w,
-            1,
-        ));
-
         // --- Body ---
         var body = window.child(layout.rect(
             0,
             3,
             w,
             h - 4,
+        ));
+
+        // --- Footer ---
+        var footer = window.child(layout.rect(
+            h - 1,
+            0,
+            w,
+            1,
         ));
 
         // =====================
@@ -263,6 +274,7 @@ pub const PRListScreen = struct {
     }
 
     const vtable = Screen.VTable{
+        .navigateInto = navigateInto,
         .handleInput = handleInput,
         .update = update,
         .render = render,

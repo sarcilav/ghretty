@@ -2,6 +2,7 @@ const std = @import("std");
 const vaxis = @import("vaxis");
 const Screen = @import("screens/screen.zig").Screen;
 const PRListScreen = @import("screens/pr_list.zig").PRListScreen;
+const PRDetailsScreen = @import("screens/pr_details.zig").PRDetailsScreen;
 
 // This can contain internal events as well as Vaxis events.
 // Internal events can be posted into the same queue as vaxis events to allow
@@ -79,8 +80,13 @@ pub const App = struct {
                     if (key.matches('q', .{ .ctrl = true })) {
                         self.should_quit = true;
                         continue;
+                    } else if (key.matches(vaxis.Key.enter, .{})) {
+                        const new_screen = try self.current_screen.navigateInto();
+
+                        try self.navigateTo(new_screen);
+                    } else {
+                        try self.current_screen.handleInput(key);
                     }
-                    try self.current_screen.handleInput(key);
                 },
                 .winsize => |ws| try self.vx.resize(self.allocator, self.tty.writer(), ws),
                 else => {
