@@ -91,13 +91,7 @@ pub const PRListScreen = struct {
                 self.err_msg = null;
                 try self.loadPRs();
             },
-            else => {
-                if (key.matches(vaxis.Key.enter, .{})) {
-                    if (self.prs.items.len > 0) {
-                        std.debug.print("Opening PR #{}\n", .{self.prs.items[self.selected_index].number});
-                    }
-                }
-            },
+            else => {},
         }
     }
 
