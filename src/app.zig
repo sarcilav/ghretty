@@ -83,7 +83,7 @@ pub const App = struct {
                     } else if (key.matches(vaxis.Key.enter, .{})) {
                         const new_screen = try self.current_screen.navigateInto();
                         try self.navigateTo(new_screen);
-                    } else if(key.matches('q', .{})){
+                    } else if (key.matches('q', .{})) {
                         self.navigateBack();
                     } else {
                         try self.current_screen.handleInput(key);
@@ -108,7 +108,7 @@ pub const App = struct {
     }
 
     pub fn navigateTo(self: *@This(), screen: *Screen) !void {
-        if(screen != self.current_screen) {
+        if (screen != self.current_screen) {
             try self.screen_stack.append(self.allocator, screen);
             self.current_screen = screen;
         }

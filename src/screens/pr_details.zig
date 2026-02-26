@@ -94,33 +94,48 @@ pub const PRDetailsScreen = struct {
             0,
             0,
             w,
-            3,
+            4,
         ));
 
         // --- Body ---
         var content = window.child(layout.rect(
             0,
-            3,
+            4,
             w,
-            h - 4,
+            h - 8,
         ));
 
         // --- Footer ---
         var footer = window.child(layout.rect(
-            h - 1,
             0,
+            h - 4,
             w,
-            1,
+            4,
         ));
 
-        _ = header.print(&.{
+        const pr_title = try std.fmt.allocPrint(
+            self.allocator,
+            "PR #{}: {s}",
+            .{ self.pr.number, self.pr.title },
+        );
+        defer self.allocator.free(pr_title);
+
+         _ = header.print(&.{
             .{
-                .text = "PR #{}: {s}", // .{ self.pr.number, self.pr.title });
+                .text = pr_title,
             },
         }, .{});
-        _ = header.print(&.{
+
+        const pr_author = try std.fmt.allocPrint(
+            self.allocator,
+            "\nAuthor: @{s}",
+            .{self.pr.author},
+        );
+        defer self.allocator.free(pr_author);
+
+         _ = header.print(&.{
             .{
-                .text = "\nAuthor: @{s}", // .{self.pr.author});
+                .text = pr_author,
             },
         }, .{});
 
@@ -153,7 +168,7 @@ pub const PRDetailsScreen = struct {
         // Footer
         // =====================
         _ = footer.print(&.{
-            .{ .text = "j/k: navigate • Enter: open • r: refresh • q: quit" },
+            .{ .text = "j/k: navigate • Enter: open • r: refresh • q: back" },
         }, .{});
     }
 
