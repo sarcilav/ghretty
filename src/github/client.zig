@@ -2,6 +2,7 @@ const std = @import("std");
 const PR = @import("../models/pr.zig").PR;
 const PRState = @import("../models/pr.zig").PRState;
 const FileChange = @import("../models/pr.zig").FileChange;
+const git = @import("../models/git.zig");
 
 pub const GitHubClient = struct {
     allocator: std.mem.Allocator,
@@ -24,6 +25,11 @@ pub const GitHubClient = struct {
         defer self.allocator.free(result);
 
         return try self.parsePRDetails(result);
+    }
+
+    pub fn fetchPRDiff(self: *@This(), pr: PR) !std.ArrayList(git.DiffLine) {
+        const raw_diff = try self.runGhCommand(&.{ "pr", "diff", try std.fmt.allocPrint(self.allocator, "{}", .{pr.number}), "--patch" });
+        return try self.parsePRDiff(raw_diff);
     }
 
     fn runGhCommand(self: *@This(), args: []const []const u8) ![]const u8 {
@@ -77,6 +83,22 @@ pub const GitHubClient = struct {
             },
         }
         return stdout;
+    }
+
+    fn parsePRDiff(self: *@This(), raw_diff_str: []const u8) !std.ArrayList(git.DiffLine) {
+        var diff_lines = std.ArrayList(git.DiffLine){};
+        errdefer {
+            diff_lines.deinit(self.allocator);
+        }
+        var lines = std.mem.splitSequence(u8, raw_diff_str, "\n");
+        while (lines.next()) |line| {
+            const diff_line = git.DiffLine{
+                .text = line,
+                .kind = git.classify(line),
+            };
+            try diff_lines.append(self.allocator, diff_line);
+        }
+        return diff_lines;
     }
 
     fn parsePRList(self: *@This(), json_str: []const u8) !std.ArrayList(PR) {
