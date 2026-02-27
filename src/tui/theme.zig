@@ -30,3 +30,12 @@ pub const loading_style = vaxis.Style{
     .fg = .{ .index = 3 }, // Yellow
     .bold = true,
 };
+
+pub const diff_line_styles = struct {
+    add: vaxis.Style = .{ .bg = .{ .index = 2 } },
+    remove: vaxis.Style = .{ .bg = .{ .index = 1 } },
+    hunk: vaxis.Style = .{ .fg = .{ .index = 3 }, .bold = true },
+    file: vaxis.Style = .{ .bold = true },
+    meta: vaxis.Style = .{ .fg = .{ .index = 6 } },
+    normal: vaxis.Style = .{},
+};
