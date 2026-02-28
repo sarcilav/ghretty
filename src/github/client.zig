@@ -21,14 +21,22 @@ pub const GitHubClient = struct {
     }
 
     pub fn fetchPRDetails(self: *@This(), pr_number: u32) !PR {
-        const result = try self.runGhCommand(&.{ "pr", "view", try std.fmt.allocPrint(self.allocator, "{}", .{pr_number}), "--json", "title,author,state,isDraft,body,files,number" });
+        const pr_str = try std.fmt.allocPrint(self.allocator, "{}", .{pr_number});
+        defer self.allocator.free(pr_str);
+
+        const result = try self.runGhCommand(&.{ "pr", "view", pr_str, "--json", "title,author,state,isDraft,body,files,number" });
         defer self.allocator.free(result);
 
         return try self.parsePRDetails(result);
     }
 
     pub fn fetchPRDiff(self: *@This(), pr: PR) !std.ArrayList(git.DiffLine) {
-        const raw_diff = try self.runGhCommand(&.{ "pr", "diff", try std.fmt.allocPrint(self.allocator, "{}", .{pr.number}), "--patch" });
+        const pr_str = try std.fmt.allocPrint(self.allocator, "{}", .{pr.number});
+        defer self.allocator.free(pr_str);
+
+        const raw_diff = try self.runGhCommand(&.{ "pr", "diff", pr_str, "--patch" });
+        defer self.allocator.free(raw_diff);
+
         return try self.parsePRDiff(raw_diff);
     }
 
@@ -68,6 +76,7 @@ pub const GitHubClient = struct {
             self.allocator,
             std.math.maxInt(usize),
         );
+        defer self.allocator.free(stderr);
 
         const term = try process.wait();
         switch (term) {
