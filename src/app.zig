@@ -116,7 +116,10 @@ pub const App = struct {
 
     pub fn navigateBack(self: *@This()) void {
         if (self.screen_stack.items.len > 1) {
-            _ = self.screen_stack.pop();
+            if(self.screen_stack.pop()) |removed_screen| {
+                removed_screen.deinit();
+            }
+
             self.current_screen = self.screen_stack.items[self.screen_stack.items.len - 1];
         }
     }
