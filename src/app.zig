@@ -3,7 +3,7 @@ const vaxis = @import("vaxis");
 const Screen = @import("screens/screen.zig").Screen;
 const PRListScreen = @import("screens/pr_list.zig").PRListScreen;
 const PRDetailsScreen = @import("screens/pr_details.zig").PRDetailsScreen;
-
+const image = @import("tui/image.zig");
 // This can contain internal events as well as Vaxis events.
 // Internal events can be posted into the same queue as vaxis events to allow
 // for a single event loop with exhaustive switching. Booya
@@ -25,10 +25,34 @@ pub const App = struct {
     loop: vaxis.Loop(Event),
 
     pub fn init(allocator: std.mem.Allocator) !@This() {
-        var vx = try vaxis.init(allocator, .{});
         var buf: [16 * 1024]u8 = undefined;
         var tty = try vaxis.Tty.init(&buf);
         errdefer tty.deinit();
+
+        // harcore image render on the right
+        const file_name = "/home/sarcilav/Downloads/ChatGPT Image Dec 8, 2025, 09_37_26 AM.png";
+
+        // Read the image file
+        const file = try std.fs.cwd().openFile(file_name, .{});
+        defer file.close();
+
+        const stat = try file.stat();
+        const image_bytes = try file.readToEndAlloc(allocator, stat.size);
+        defer allocator.free(image_bytes);
+
+        // Determine image format
+        const format = 100; // PNG
+
+        // Base64 encode the image data
+        const base64_encoder = std.base64.standard.Encoder;
+        const encoded_len = base64_encoder.calcSize(image_bytes.len);
+        const encoded = try allocator.alloc(u8, encoded_len);
+        defer allocator.free(encoded);
+        _ = base64_encoder.encode(encoded, image_bytes);
+
+        try image.sendKittyImage(tty.writer(), 1, encoded, format, image_bytes.len);
+
+        var vx = try vaxis.init(allocator, .{});
         errdefer vx.deinit(allocator, tty.writer());
 
         var screen_stack = std.ArrayListUnmanaged(*Screen){};
@@ -104,6 +128,8 @@ pub const App = struct {
             // Render
             try self.current_screen.render(win);
             try self.vx.render(self.tty.writer());
+
+            try image.placeKittyImage(self.tty.writer(), 1, 1, 90, 20);
         }
     }
 
@@ -116,7 +142,7 @@ pub const App = struct {
 
     pub fn navigateBack(self: *@This()) void {
         if (self.screen_stack.items.len > 1) {
-            if(self.screen_stack.pop()) |removed_screen| {
+            if (self.screen_stack.pop()) |removed_screen| {
                 removed_screen.deinit();
             }
 
