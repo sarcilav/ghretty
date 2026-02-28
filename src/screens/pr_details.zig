@@ -54,11 +54,8 @@ pub const PRDetailsScreen = struct {
 
     pub fn deinit(screen: *Screen) void {
         const self = fromBase(screen);
-        // for (self.diff_lines.items) |line| {
-        //     self.allocator.free(line);
-        // }
-
         self.diff_lines.deinit(self.allocator);
+        self.pr.deinit(self.allocator);
         self.allocator.destroy(self.github_client);
         self.allocator.destroy(self);
     }
