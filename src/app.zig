@@ -29,29 +29,6 @@ pub const App = struct {
         var tty = try vaxis.Tty.init(&buf);
         errdefer tty.deinit();
 
-        // harcore image render on the right
-        const file_name = "/home/sarcilav/Downloads/ChatGPT Image Dec 8, 2025, 09_37_26 AM.png";
-
-        // Read the image file
-        const file = try std.fs.cwd().openFile(file_name, .{});
-        defer file.close();
-
-        const stat = try file.stat();
-        const image_bytes = try file.readToEndAlloc(allocator, stat.size);
-        defer allocator.free(image_bytes);
-
-        // Determine image format
-        const format = 100; // PNG
-
-        // Base64 encode the image data
-        const base64_encoder = std.base64.standard.Encoder;
-        const encoded_len = base64_encoder.calcSize(image_bytes.len);
-        const encoded = try allocator.alloc(u8, encoded_len);
-        defer allocator.free(encoded);
-        _ = base64_encoder.encode(encoded, image_bytes);
-
-        try image.sendKittyImage(tty.writer(), 1, encoded, format, image_bytes.len);
-
         var vx = try vaxis.init(allocator, .{});
         errdefer vx.deinit(allocator, tty.writer());
 
@@ -128,8 +105,6 @@ pub const App = struct {
             // Render
             try self.current_screen.render(win);
             try self.vx.render(self.tty.writer());
-
-            try image.placeKittyImage(self.tty.writer(), 1, 1, 90, 20);
         }
     }
 
