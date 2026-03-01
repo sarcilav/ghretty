@@ -69,7 +69,10 @@ pub const PRDetailsScreen = struct {
 
         switch (key.codepoint) {
             'j' => {
-                self.scroll_offset += 1;
+                if(self.scroll_offset < self.diff_lines.items.len - 1 ) {
+                    // avoids infinite scrolling off the window, but it will be nicer to avoid getting out of the screen, for now it is fine
+                    self.scroll_offset += 1;
+                }
             },
             'k' => {
                 if (self.scroll_offset > 0) {
