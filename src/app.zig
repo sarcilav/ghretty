@@ -71,7 +71,6 @@ pub const App = struct {
         // Start the read loop. This puts the terminal in raw mode and begins
         // reading user input
         try self.loop.start();
-        defer self.loop.stop();
         try self.vx.queryTerminal(self.tty.writer(), 1 * std.time.ns_per_s);
 
         while (!self.should_quit) {
@@ -106,6 +105,7 @@ pub const App = struct {
             try self.current_screen.render(win);
             try self.vx.render(self.tty.writer());
         }
+        self.loop.stop();
     }
 
     pub fn navigateTo(self: *@This(), screen: *Screen) !void {
