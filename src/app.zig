@@ -3,7 +3,7 @@ const vaxis = @import("vaxis");
 const Screen = @import("screens/screen.zig").Screen;
 const PRListScreen = @import("screens/pr_list.zig").PRListScreen;
 const PRDetailsScreen = @import("screens/pr_details.zig").PRDetailsScreen;
-const image = @import("tui/image.zig");
+
 // This can contain internal events as well as Vaxis events.
 // Internal events can be posted into the same queue as vaxis events to allow
 // for a single event loop with exhaustive switching. Booya
@@ -17,7 +17,7 @@ const Event = union(enum) {
 pub const App = struct {
     allocator: std.mem.Allocator,
     vx: vaxis.Vaxis,
-    tty_buf: [16 * 1024]u8,
+    tty_buf: []u8,
     tty: vaxis.Tty,
     current_screen: *Screen,
     screen_stack: std.ArrayListUnmanaged(*Screen),
@@ -25,52 +25,56 @@ pub const App = struct {
     loop: vaxis.Loop(Event),
 
     pub fn init(allocator: std.mem.Allocator) !@This() {
-        var buf: [16 * 1024]u8 = undefined;
-        var tty = try vaxis.Tty.init(&buf);
-        errdefer tty.deinit();
+        const buf = try allocator.alloc(u8, 16 * 1024);
 
-        var vx = try vaxis.init(allocator, .{});
-        errdefer vx.deinit(allocator, tty.writer());
-
-        var screen_stack = std.ArrayListUnmanaged(*Screen){};
-
-        // Create initial screen
-        const pr_list_screen = try PRListScreen.create(allocator);
-
-        try screen_stack.append(allocator, pr_list_screen);
-
-        var loop: vaxis.Loop(Event) = .{
-            .tty = &tty,
-            .vaxis = &vx,
-        };
-        try loop.init();
-
-        return @This(){
+        var app = App{
             .allocator = allocator,
-            .vx = vx,
+            .vx = undefined,
             .tty_buf = buf,
-            .tty = tty,
-            .current_screen = pr_list_screen,
-            .screen_stack = screen_stack,
-            .loop = loop,
+            .tty = undefined,
+            .current_screen = undefined,
+            .screen_stack = .{},
+            .loop = undefined,
         };
+
+        // Initialize tty inside app
+        app.tty = try vaxis.Tty.init(app.tty_buf);
+        errdefer app.tty.deinit();
+
+        // Initialize vaxis inside app
+        app.vx = try vaxis.init(allocator, .{});
+        errdefer app.vx.deinit(allocator, app.tty.writer());
+
+        // Screens
+        const pr_list_screen = try PRListScreen.create(allocator);
+        try app.screen_stack.append(allocator, pr_list_screen);
+        app.current_screen = pr_list_screen;
+
+        // NOW initialize loop using pointers to app fields
+        app.loop = .{
+            .tty = &app.tty,
+            .vaxis = &app.vx,
+        };
+        try app.loop.init();
+
+        return app;
     }
 
     pub fn deinit(self: *@This()) void {
-        // 1️⃣ Deinit all screens
         for (self.screen_stack.items) |screen| {
             screen.deinit();
         }
         self.screen_stack.deinit(self.allocator);
         self.vx.deinit(self.allocator, self.tty.writer());
         self.tty.deinit();
-        //self.current_screen.deinit(); it is deinit as part of the stack
+        self.allocator.free(self.tty_buf);
     }
 
     pub fn run(self: *@This()) !void {
         // Start the read loop. This puts the terminal in raw mode and begins
         // reading user input
         try self.loop.start();
+        defer self.loop.stop();
         try self.vx.queryTerminal(self.tty.writer(), 1 * std.time.ns_per_s);
 
         while (!self.should_quit) {
@@ -105,7 +109,6 @@ pub const App = struct {
             try self.current_screen.render(win);
             try self.vx.render(self.tty.writer());
         }
-        self.loop.stop();
     }
 
     pub fn navigateTo(self: *@This(), screen: *Screen) !void {
