@@ -101,14 +101,61 @@ pub const GitHubClient = struct {
         }
         var lines = std.mem.splitSequence(u8, raw_diff_str, "\n");
         while (lines.next()) |line| {
+            const safe = try escapeForDisplay(self.allocator, line);
+
             const diff_line = git.DiffLine{
-                .text = line,
+                .text = safe,
                 .kind = git.classify(line),
             };
             try diff_lines.append(self.allocator, diff_line);
         }
         return diff_lines;
     }
+
+    fn escapeForDisplay(
+        allocator: std.mem.Allocator,
+        input: []const u8,
+    ) ![]u8 {
+        const hex = comptime "0123456789abcdef";
+
+        // ---------- PASS 1: compute final size ----------
+        var out_len: usize = 0;
+
+        for (input) |b| {
+            if (b == 0x1b or
+                    (b < 0x20 and b != '\n' and b != '\t') or
+                    b == 0x7f)
+                {
+                    out_len += 4; // "\xHH"
+            } else {
+                    out_len += 1;
+            }
+        }
+
+        // ---------- Allocate exactly once ----------
+        var out = try allocator.alloc(u8, out_len);
+
+        // ---------- PASS 2: fill ----------
+        var j: usize = 0;
+
+        for (input) |b| {
+            if (b == 0x1b or
+                    (b < 0x20 and b != '\n' and b != '\t') or
+                    b == 0x7f)
+                {
+                    out[j] = '\\'; j += 1;
+                    out[j] = 'x';  j += 1;
+                    out[j] = hex[b >> 4]; j += 1;
+                    out[j] = hex[b & 0xF]; j += 1;
+            } else {
+                    out[j] = b;
+                    j += 1;
+            }
+        }
+
+        return out;
+    }
+
 
     fn parsePRList(self: *@This(), json_str: []const u8) !std.ArrayList(PR) {
         var parsed = try std.json.parseFromSlice(std.json.Value, self.allocator, json_str, .{ .allocate = .alloc_if_needed });

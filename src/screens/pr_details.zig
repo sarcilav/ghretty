@@ -54,6 +54,9 @@ pub const PRDetailsScreen = struct {
 
     pub fn deinit(screen: *Screen) void {
         const self = fromBase(screen);
+        for (self.diff_lines.items) |line| {
+            self.allocator.free(line.text);
+        }
         self.diff_lines.deinit(self.allocator);
         self.pr.deinit(self.allocator);
         self.allocator.destroy(self.github_client);
@@ -207,6 +210,7 @@ pub const PRDetailsScreen = struct {
                 .text = diff_line.text,
                 .style = getDiffStyle(diff_line.kind),
             };
+
             try segments.append(self.allocator, segment);
 
             // Add newline segment (except after last line)
