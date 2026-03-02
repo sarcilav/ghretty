@@ -233,10 +233,9 @@ pub const PRListScreen = struct {
                 "#{d} {s} @{s}",
                 .{ pr.number, pr.title, pr.author },
             );
-            defer self.allocator.free(line);
 
             // Store for navigation
-            try self.lines.append(self.allocator, try self.allocator.dupe(u8, line));
+            try self.lines.append(self.allocator, line);
 
             // Create segment with appropriate style
             const segment = vaxis.Segment{
