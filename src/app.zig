@@ -16,9 +16,9 @@ const Event = union(enum) {
 
 pub const App = struct {
     allocator: std.mem.Allocator,
-    vx: vaxis.Vaxis,
+    vx: *vaxis.Vaxis,
     tty_buf: []u8,
-    tty: vaxis.Tty,
+    tty: *vaxis.Tty,
     current_screen: *Screen,
     screen_stack: std.ArrayListUnmanaged(*Screen),
     should_quit: bool = false,
@@ -27,23 +27,23 @@ pub const App = struct {
     pub fn init(allocator: std.mem.Allocator) !@This() {
         const buf = try allocator.alloc(u8, 16 * 1024);
 
+        const tty = try allocator.create(vaxis.Tty);
+        tty.* = try vaxis.Tty.init(buf);
+        errdefer tty.deinit();
+
+        const vx = try allocator.create(vaxis.Vaxis);
+        vx.* = try vaxis.init(allocator, .{});
+        errdefer vx.deinit(allocator, tty.writer());
+
         var app = App{
             .allocator = allocator,
-            .vx = undefined,
+            .vx = vx,
             .tty_buf = buf,
-            .tty = undefined,
+            .tty = tty,
             .current_screen = undefined,
             .screen_stack = .{},
             .loop = undefined,
         };
-
-        // Initialize tty inside app
-        app.tty = try vaxis.Tty.init(app.tty_buf);
-        errdefer app.tty.deinit();
-
-        // Initialize vaxis inside app
-        app.vx = try vaxis.init(allocator, .{});
-        errdefer app.vx.deinit(allocator, app.tty.writer());
 
         // Screens
         const pr_list_screen = try PRListScreen.create(allocator);
@@ -52,8 +52,8 @@ pub const App = struct {
 
         // NOW initialize loop using pointers to app fields
         app.loop = .{
-            .tty = &app.tty,
-            .vaxis = &app.vx,
+            .tty = app.tty,
+            .vaxis = app.vx,
         };
         try app.loop.init();
 
@@ -66,7 +66,9 @@ pub const App = struct {
         }
         self.screen_stack.deinit(self.allocator);
         self.vx.deinit(self.allocator, self.tty.writer());
+        self.allocator.destroy(self.vx);
         self.tty.deinit();
+        self.allocator.destroy(self.tty);
         self.allocator.free(self.tty_buf);
     }
 
