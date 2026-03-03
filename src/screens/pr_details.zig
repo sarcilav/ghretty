@@ -32,6 +32,8 @@ pub const PRDetailsScreen = struct {
     loading: bool = true,
     err_msg: ?[]const u8 = null,
     diff_lines: std.ArrayList(git.DiffLine),
+    pr_title: []const u8,
+    pr_author: []const u8,
 
     pub fn create(allocator: std.mem.Allocator, pr: PR) !*Screen {
         const self = try allocator.create(@This());
@@ -48,6 +50,8 @@ pub const PRDetailsScreen = struct {
             .loading = true,
             .err_msg = null,
             .diff_lines = diff_lines,
+            .pr_author = undefined,
+            .pr_title = undefined,
         };
         return &self.base;
     }
@@ -58,7 +62,11 @@ pub const PRDetailsScreen = struct {
             self.allocator.free(line.text);
         }
         self.diff_lines.deinit(self.allocator);
+
+        self.allocator.free(self.pr_title);
+        self.allocator.free(self.pr_author);
         self.pr.deinit(self.allocator);
+
         self.allocator.destroy(self.github_client);
         self.allocator.destroy(self);
     }
@@ -114,6 +122,18 @@ pub const PRDetailsScreen = struct {
         self.diff_lines.clearRetainingCapacity();
         // TODO handle fetchPRDiff errors
         self.diff_lines = try self.github_client.fetchPRDiff(self.pr);
+
+        self.pr_title = try std.fmt.allocPrint(
+            self.allocator,
+            "PR #{}: {s}",
+            .{ self.pr.number, self.pr.title },
+        );
+
+        self.pr_author = try std.fmt.allocPrint(
+            self.allocator,
+            "\nAuthor: @{s}",
+            .{self.pr.author},
+        );
     }
 
     pub fn render(screen: *Screen, window: vaxis.Window) !void {
@@ -147,29 +167,15 @@ pub const PRDetailsScreen = struct {
             4,
         ));
 
-        const pr_title = try std.fmt.allocPrint(
-            self.allocator,
-            "PR #{}: {s}",
-            .{ self.pr.number, self.pr.title },
-        );
-        defer self.allocator.free(pr_title);
-
         _ = header.print(&.{
             .{
-                .text = pr_title,
+                .text = self.pr_title,
             },
         }, .{});
 
-        const pr_author = try std.fmt.allocPrint(
-            self.allocator,
-            "\nAuthor: @{s}",
-            .{self.pr.author},
-        );
-        defer self.allocator.free(pr_author);
-
         _ = header.print(&.{
             .{
-                .text = pr_author,
+                .text = self.pr_author,
             },
         }, .{});
 
