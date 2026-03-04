@@ -260,7 +260,7 @@ pub const PRDetailsScreen = struct {
         // Footer
         // =====================
         _ = footer.print(&.{
-            .{ .text = "j/k: navigate • Enter: open • r: refresh • q: back" },
+            .{ .text = "j/k: navigate • Enter: open • r: refresh • q: back • ctrl-q: quit" },
         }, .{});
     }
 

@@ -254,7 +254,7 @@ pub const PRListScreen = struct {
         // Footer
         // =====================
         _ = footer.print(&.{
-            .{ .text = "j/k: navigate • Enter: open • r: refresh • q: quit" },
+            .{ .text = "j/k: navigate • Enter: open • r: refresh" },
         }, .{});
     }
 
