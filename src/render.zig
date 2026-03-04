@@ -50,11 +50,11 @@ pub fn main() !void {
 /// Values correspond to the Kitty graphics protocol's 'f' parameter.
 fn formatFromExtension(file_name: []const u8) ?u32 {
     const ext = std.fs.path.extension(file_name);
-    if (std.ascii.eqlIgnoreCase(ext, ".png")) return 100;   // PNG
-    if (std.ascii.eqlIgnoreCase(ext, ".jpg")) return 101;   // JPEG
-    if (std.ascii.eqlIgnoreCase(ext, ".jpeg")) return 101;  // JPEG
-    if (std.ascii.eqlIgnoreCase(ext, ".gif")) return 102;   // GIF
-    if (std.ascii.eqlIgnoreCase(ext, ".bmp")) return 103;   // BMP
+    if (std.ascii.eqlIgnoreCase(ext, ".png")) return 100; // PNG
+    if (std.ascii.eqlIgnoreCase(ext, ".jpg")) return 101; // JPEG
+    if (std.ascii.eqlIgnoreCase(ext, ".jpeg")) return 101; // JPEG
+    if (std.ascii.eqlIgnoreCase(ext, ".gif")) return 102; // GIF
+    if (std.ascii.eqlIgnoreCase(ext, ".bmp")) return 103; // BMP
     return null;
 }
 

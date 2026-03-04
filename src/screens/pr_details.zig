@@ -31,7 +31,7 @@ pub const PRDetailsScreen = struct {
     pr: ?PR = null,
     selected_index: usize = 0,
     scroll_offset: usize = 0,
-    
+
     loading: bool = true,
     err_msg: ?[]const u8 = null,
     diff_lines: std.ArrayList(git.DiffLine),
@@ -62,9 +62,9 @@ pub const PRDetailsScreen = struct {
         }
         self.diff_lines.deinit(self.allocator);
 
-        if(self.pr_title) |title| self.allocator.free(title);
-        if(self.pr_author) |author| self.allocator.free(author);
-        if(self.pr) |*pr| pr.deinit(self.allocator);
+        if (self.pr_title) |title| self.allocator.free(title);
+        if (self.pr_author) |author| self.allocator.free(author);
+        if (self.pr) |*pr| pr.deinit(self.allocator);
 
         self.allocator.destroy(self.github_client);
         self.allocator.destroy(self);
@@ -79,7 +79,7 @@ pub const PRDetailsScreen = struct {
 
         switch (key.codepoint) {
             'j' => {
-                if(self.selected_index < self.diff_lines.items.len - 1) {
+                if (self.selected_index < self.diff_lines.items.len - 1) {
                     // avoids infinite scrolling off the window
                     self.selected_index += 1;
                 }
@@ -115,9 +115,9 @@ pub const PRDetailsScreen = struct {
         }
         self.diff_lines.deinit(self.allocator);
 
-        if(self.pr_title) |title| self.allocator.free(title);
-        if(self.pr_author) |author| self.allocator.free(author);
-        if(self.pr) |*pr| pr.deinit(self.allocator);
+        if (self.pr_title) |title| self.allocator.free(title);
+        if (self.pr_author) |author| self.allocator.free(author);
+        if (self.pr) |*pr| pr.deinit(self.allocator);
 
         const fetched_pr = self.github_client.fetchPRDetails(self.pr_number) catch |err| {
             self.err_msg = switch (err) {
@@ -211,13 +211,13 @@ pub const PRDetailsScreen = struct {
             }, .{});
             return;
         }
-        
+
         var segments = std.ArrayList(vaxis.Segment){};
         defer segments.deinit(self.allocator);
 
-        if((self.selected_index + 1 + self.scroll_offset) % content.height == 0){
-            const new_offset = self.scroll_offset + content.height/2;
-            if(new_offset < self.diff_lines.items.len - 1) {
+        if ((self.selected_index + 1 + self.scroll_offset) % content.height == 0) {
+            const new_offset = self.scroll_offset + content.height / 2;
+            if (new_offset < self.diff_lines.items.len - 1) {
                 self.scroll_offset = new_offset;
             }
         }
@@ -227,7 +227,6 @@ pub const PRDetailsScreen = struct {
             self.diff_lines.items.len -| self.scroll_offset,
             content.height,
         );
-
 
         for (0..visible) |i| {
             const idx = self.scroll_offset + i;

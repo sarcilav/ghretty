@@ -123,12 +123,12 @@ pub const GitHubClient = struct {
 
         for (input) |b| {
             if (b == 0x1b or
-                    (b < 0x20 and b != '\n' and b != '\t') or
-                    b == 0x7f)
-                {
-                    out_len += 4; // "\xHH"
+                (b < 0x20 and b != '\n' and b != '\t') or
+                b == 0x7f)
+            {
+                out_len += 4; // "\xHH"
             } else {
-                    out_len += 1;
+                out_len += 1;
             }
         }
 
@@ -140,22 +140,25 @@ pub const GitHubClient = struct {
 
         for (input) |b| {
             if (b == 0x1b or
-                    (b < 0x20 and b != '\n' and b != '\t') or
-                    b == 0x7f)
-                {
-                    out[j] = '\\'; j += 1;
-                    out[j] = 'x';  j += 1;
-                    out[j] = hex[b >> 4]; j += 1;
-                    out[j] = hex[b & 0xF]; j += 1;
+                (b < 0x20 and b != '\n' and b != '\t') or
+                b == 0x7f)
+            {
+                out[j] = '\\';
+                j += 1;
+                out[j] = 'x';
+                j += 1;
+                out[j] = hex[b >> 4];
+                j += 1;
+                out[j] = hex[b & 0xF];
+                j += 1;
             } else {
-                    out[j] = b;
-                    j += 1;
+                out[j] = b;
+                j += 1;
             }
         }
 
         return out;
     }
-
 
     fn parsePRList(self: *@This(), json_str: []const u8) !std.ArrayList(PR) {
         var parsed = try std.json.parseFromSlice(std.json.Value, self.allocator, json_str, .{ .allocate = .alloc_if_needed });

@@ -21,21 +21,16 @@ const vaxis = @import("vaxis");
 //         .max_height = child.height,
 //     },
 // );
-pub fn placeKittyImage(
-    writer: *std.Io.Writer,
-    image_id: u32,
-    window: vaxis.Window
-) !void {
+pub fn placeKittyImage(writer: *std.Io.Writer, image_id: u32, window: vaxis.Window) !void {
     const x = window.x_off;
     const y = window.y_off;
 
     // delete previous placement
     try writer.print("\x1b_Ga=d,i={d},q=2\x1b\\", .{image_id});
 
-
     try writer.print(
         "\x1b_Ga=p,i={d},x={d},y={d},q=2\x1b\\",
-                         .{ image_id, x, y },
+        .{ image_id, x, y },
     );
 }
 
