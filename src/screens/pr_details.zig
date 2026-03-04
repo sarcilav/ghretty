@@ -31,6 +31,7 @@ pub const PRDetailsScreen = struct {
     pr: ?PR = null,
     selected_index: usize = 0,
     scroll_offset: usize = 0,
+    
     loading: bool = true,
     err_msg: ?[]const u8 = null,
     diff_lines: std.ArrayList(git.DiffLine),
@@ -78,8 +79,8 @@ pub const PRDetailsScreen = struct {
 
         switch (key.codepoint) {
             'j' => {
-                if(self.selected_index < self.diff_lines.items.len - 1 ) {
-                    // avoids infinite scrolling off the window, but it will be nicer to avoid getting out of the screen, for now it is fine
+                if(self.selected_index < self.diff_lines.items.len - 1) {
+                    // avoids infinite scrolling off the window
                     self.selected_index += 1;
                 }
             },
@@ -210,14 +211,23 @@ pub const PRDetailsScreen = struct {
             }, .{});
             return;
         }
+        
+        var segments = std.ArrayList(vaxis.Segment){};
+        defer segments.deinit(self.allocator);
+
+        if((self.selected_index + 1 + self.scroll_offset) % content.height == 0){
+            const new_offset = self.scroll_offset + content.height/2;
+            if(new_offset < self.diff_lines.items.len - 1) {
+                self.scroll_offset = new_offset;
+            }
+        }
+
         // TODO: Draw PR description and comments
         const visible = @min(
             self.diff_lines.items.len -| self.scroll_offset,
             content.height,
         );
 
-        var segments = std.ArrayList(vaxis.Segment){};
-        defer segments.deinit(self.allocator);
 
         for (0..visible) |i| {
             const idx = self.scroll_offset + i;
