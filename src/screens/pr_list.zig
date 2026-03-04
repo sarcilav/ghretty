@@ -60,7 +60,7 @@ pub const PRListScreen = struct {
         const self = fromBase(screen);
 
         if (self.prs.items.len > 0) {
-            const pr_details_screen = try PRDetailsScreen.create(self.allocator, self.prs.items[self.selected_index]);
+            const pr_details_screen = try PRDetailsScreen.create(self.allocator, self.prs.items[self.selected_index].number);
             return pr_details_screen;
         }
         return &self.base;

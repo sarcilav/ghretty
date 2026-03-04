@@ -27,15 +27,17 @@ pub const PRDetailsScreen = struct {
     base: Screen,
     allocator: std.mem.Allocator,
     github_client: *GitHubClient,
-    pr: PR,
+    pr_number: u32 = 0,
+    pr: ?PR = null,
+    selected_index: usize = 0,
     scroll_offset: usize = 0,
     loading: bool = true,
     err_msg: ?[]const u8 = null,
     diff_lines: std.ArrayList(git.DiffLine),
-    pr_title: []const u8 = undefined,
-    pr_author: []const u8 = undefined,
+    pr_title: ?[]const u8 = null,
+    pr_author: ?[]const u8 = null,
 
-    pub fn create(allocator: std.mem.Allocator, pr: PR) !*Screen {
+    pub fn create(allocator: std.mem.Allocator, pr_number: u32) !*Screen {
         const self = try allocator.create(@This());
 
         const github_client = try allocator.create(GitHubClient);
@@ -46,7 +48,7 @@ pub const PRDetailsScreen = struct {
             .base = .{ .vtable = &vtable },
             .allocator = allocator,
             .github_client = github_client,
-            .pr = pr,
+            .pr_number = pr_number,
             .diff_lines = diff_lines,
         };
         return &self.base;
@@ -59,9 +61,9 @@ pub const PRDetailsScreen = struct {
         }
         self.diff_lines.deinit(self.allocator);
 
-        self.allocator.free(self.pr_title);
-        self.allocator.free(self.pr_author);
-        self.pr.deinit(self.allocator);
+        if(self.pr_title) |title| self.allocator.free(title);
+        if(self.pr_author) |author| self.allocator.free(author);
+        if(self.pr) |*pr| pr.deinit(self.allocator);
 
         self.allocator.destroy(self.github_client);
         self.allocator.destroy(self);
@@ -76,14 +78,14 @@ pub const PRDetailsScreen = struct {
 
         switch (key.codepoint) {
             'j' => {
-                if(self.scroll_offset < self.diff_lines.items.len - 1 ) {
+                if(self.selected_index < self.diff_lines.items.len - 1 ) {
                     // avoids infinite scrolling off the window, but it will be nicer to avoid getting out of the screen, for now it is fine
-                    self.scroll_offset += 1;
+                    self.selected_index += 1;
                 }
             },
             'k' => {
-                if (self.scroll_offset > 0) {
-                    self.scroll_offset -= 1;
+                if (self.selected_index > 0) {
+                    self.selected_index -= 1;
                 }
             },
             'r' => {
@@ -105,7 +107,18 @@ pub const PRDetailsScreen = struct {
 
     fn loadPRDetails(self: *@This()) !void {
         defer self.loading = false;
-        const fetched_pr = self.github_client.fetchPRDetails(self.pr.number) catch |err| {
+
+        // avoid leaking previous allocations
+        for (self.diff_lines.items) |line| {
+            self.allocator.free(line.text);
+        }
+        self.diff_lines.deinit(self.allocator);
+
+        if(self.pr_title) |title| self.allocator.free(title);
+        if(self.pr_author) |author| self.allocator.free(author);
+        if(self.pr) |*pr| pr.deinit(self.allocator);
+
+        const fetched_pr = self.github_client.fetchPRDetails(self.pr_number) catch |err| {
             self.err_msg = switch (err) {
                 error.GhCommandFailed => "GitHub CLI command failed. Make sure 'gh' is installed and authenticated.",
                 error.MissingField => "Invalid response from GitHub API.",
@@ -113,23 +126,25 @@ pub const PRDetailsScreen = struct {
             };
             return;
         };
+
         self.pr = fetched_pr;
-        self.scroll_offset = 0;
-        self.diff_lines.clearRetainingCapacity();
+
         // TODO handle fetchPRDiff errors
-        self.diff_lines = try self.github_client.fetchPRDiff(self.pr);
+        self.diff_lines = try self.github_client.fetchPRDiff(self.pr.?);
 
         self.pr_title = try std.fmt.allocPrint(
             self.allocator,
             "PR #{}: {s}",
-            .{ self.pr.number, self.pr.title },
+            .{ self.pr_number, self.pr.?.title },
         );
 
         self.pr_author = try std.fmt.allocPrint(
             self.allocator,
             "\nAuthor: @{s}",
-            .{self.pr.author},
+            .{self.pr.?.author},
         );
+        self.scroll_offset = 0;
+        self.selected_index = 0;
     }
 
     pub fn render(screen: *Screen, window: vaxis.Window) !void {
@@ -165,13 +180,13 @@ pub const PRDetailsScreen = struct {
 
         _ = header.print(&.{
             .{
-                .text = self.pr_title,
+                .text = self.pr_title.?,
             },
         }, .{});
 
         _ = header.print(&.{
             .{
-                .text = self.pr_author,
+                .text = self.pr_author.?,
             },
         }, .{});
 
@@ -207,10 +222,11 @@ pub const PRDetailsScreen = struct {
         for (0..visible) |i| {
             const idx = self.scroll_offset + i;
             const diff_line = self.diff_lines.items[idx];
+            const is_selected = idx == self.selected_index;
 
             const segment = vaxis.Segment{
                 .text = diff_line.text,
-                .style = getDiffStyle(diff_line.kind),
+                .style = if (is_selected) theme.selected_row_style else getDiffStyle(diff_line.kind),
             };
 
             try segments.append(self.allocator, segment);
