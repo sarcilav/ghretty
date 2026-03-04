@@ -34,7 +34,7 @@ pub const GitHubClient = struct {
         const pr_str = try std.fmt.allocPrint(self.allocator, "{}", .{pr.number});
         defer self.allocator.free(pr_str);
 
-        const raw_diff = try self.runGhCommand(&.{ "pr", "diff", pr_str, "--patch" });
+        const raw_diff = try self.runGhCommand(&.{ "pr", "diff", pr_str });//, "--patch" });
         defer self.allocator.free(raw_diff);
 
         return try self.parsePRDiff(raw_diff);
