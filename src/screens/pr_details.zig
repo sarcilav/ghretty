@@ -31,7 +31,7 @@ pub const PRDetailsScreen = struct {
     pr: ?PR = null,
     selected_index: usize = 0,
     scroll_offset: usize = 0,
-
+    visible_area: usize = 10, // use a default value that will be computed on the first render cycle
     loading: bool = true,
     err_msg: ?[]const u8 = null,
     diff_lines: std.ArrayList(git.DiffLine),
@@ -76,16 +76,30 @@ pub const PRDetailsScreen = struct {
     }
     pub fn handleInput(screen: *Screen, key: vaxis.Key) !void {
         const self = fromBase(screen);
-
+        const half_page = self.visible_area / 2;
         switch (key.codepoint) {
             'j' => {
                 if (self.selected_index < self.diff_lines.items.len - 1) {
                     // avoids infinite scrolling off the window
                     self.selected_index += 1;
+                    // if we are at the bottom of visible area
+                    if ((self.selected_index + 1 + self.scroll_offset) % self.visible_area == 0) {
+                        const new_offset = self.scroll_offset + half_page;
+                        if (new_offset < self.diff_lines.items.len - 1) {
+                            self.scroll_offset = new_offset;
+                        }
+                    }
                 }
             },
             'k' => {
                 if (self.selected_index > 0) {
+                    if (self.selected_index == self.scroll_offset) {
+                        if (self.scroll_offset > half_page) {
+                            self.scroll_offset -= half_page;
+                        } else {
+                            self.scroll_offset = 0;
+                        }
+                    }
                     self.selected_index -= 1;
                 }
             },
@@ -170,6 +184,7 @@ pub const PRDetailsScreen = struct {
             w,
             h - 8,
         ));
+        self.visible_area = content.height;
 
         // --- Footer ---
         var footer = window.child(layout.rect(
@@ -214,13 +229,6 @@ pub const PRDetailsScreen = struct {
 
         var segments = std.ArrayList(vaxis.Segment){};
         defer segments.deinit(self.allocator);
-
-        if ((self.selected_index + 1 + self.scroll_offset) % content.height == 0) {
-            const new_offset = self.scroll_offset + content.height / 2;
-            if (new_offset < self.diff_lines.items.len - 1) {
-                self.scroll_offset = new_offset;
-            }
-        }
 
         // TODO: Draw PR description and comments
         const visible = @min(
