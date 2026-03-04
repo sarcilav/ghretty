@@ -33,10 +33,6 @@ pub const PRListScreen = struct {
             .allocator = allocator,
             .github_client = github_client,
             .prs = prs,
-            .selected_index = 0,
-            .offset = 0,
-            .loading = true,
-            .err_msg = null,
             .lines = lines,
         };
 

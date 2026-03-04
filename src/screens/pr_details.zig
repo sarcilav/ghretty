@@ -32,8 +32,8 @@ pub const PRDetailsScreen = struct {
     loading: bool = true,
     err_msg: ?[]const u8 = null,
     diff_lines: std.ArrayList(git.DiffLine),
-    pr_title: []const u8,
-    pr_author: []const u8,
+    pr_title: []const u8 = undefined,
+    pr_author: []const u8 = undefined,
 
     pub fn create(allocator: std.mem.Allocator, pr: PR) !*Screen {
         const self = try allocator.create(@This());
@@ -47,11 +47,7 @@ pub const PRDetailsScreen = struct {
             .allocator = allocator,
             .github_client = github_client,
             .pr = pr,
-            .loading = true,
-            .err_msg = null,
             .diff_lines = diff_lines,
-            .pr_author = undefined,
-            .pr_title = undefined,
         };
         return &self.base;
     }
