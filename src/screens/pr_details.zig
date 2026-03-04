@@ -34,10 +34,66 @@ pub const PRDetailsScreen = struct {
     visible_area: usize = 10, // use a default value that will be computed on the first render cycle
     loading: bool = true,
     err_msg: ?[]const u8 = null,
-    file_diffs: std.ArrayList(git.FileDiff), // NEW: organized by file
-    diff_lines: std.ArrayList(git.DiffLine), // OLD: flat list (temporary)
+    file_diffs: std.ArrayList(git.FileDiff),
     pr_title: ?[]const u8 = null,
     pr_author: ?[]const u8 = null,
+
+    // Helper function to get total display lines
+    fn getTotalDisplayLines(self: *@This()) usize {
+        var total: usize = 0;
+        for (self.file_diffs.items) |file_diff| {
+            total += 1; // file header
+            for (file_diff.hunks.items) |hunk| {
+                total += 1; // Hunk header
+                total += hunk.lines.items.len;
+            }
+        }
+        return total;
+    }
+
+    // Helper function to get line info at index
+    fn getLineInfo(self: *@This(), index: usize) struct {
+        is_hunk_header: bool,
+        text: []const u8,
+        kind: ?git.DiffLineKind,
+    } {
+        var current_idx: usize = 0;
+        for (self.file_diffs.items) |file_diff| {
+            if (current_idx == index) {
+                return .{ .is_hunk_header = false, .text = file_diff.file_path, .kind = .file_header };
+            }
+            current_idx += 1;
+            for (file_diff.hunks.items) |hunk| {
+                // Check hunk header
+                if (current_idx == index) {
+                    return .{
+                        .is_hunk_header = true,
+                        .text = hunk.header,
+                        .kind = .hunk_header,
+                    };
+                }
+                current_idx += 1;
+
+                // Check lines in hunk
+                for (hunk.lines.items) |line| {
+                    if (current_idx == index) {
+                        return .{
+                            .is_hunk_header = false,
+                            .text = line.text,
+                            .kind = line.kind,
+                        };
+                    }
+                    current_idx += 1;
+                }
+            }
+        }
+        // Return empty if index out of bounds
+        return .{
+            .is_hunk_header = false,
+            .text = "",
+            .kind = null,
+        };
+    }
 
     pub fn create(allocator: std.mem.Allocator, pr_number: u32) !*Screen {
         const self = try allocator.create(@This());
@@ -46,15 +102,13 @@ pub const PRDetailsScreen = struct {
         github_client.* = GitHubClient.init(allocator);
 
         const file_diffs = std.ArrayList(git.FileDiff){};
-        const diff_lines = std.ArrayList(git.DiffLine){}; // Keep for now
 
         self.* = .{
             .base = .{ .vtable = &vtable },
             .allocator = allocator,
             .github_client = github_client,
             .pr_number = pr_number,
-            .file_diffs = file_diffs, // NEW
-            .diff_lines = diff_lines, // Keep for compatibility
+            .file_diffs = file_diffs,
         };
         return &self.base;
     }
@@ -67,12 +121,6 @@ pub const PRDetailsScreen = struct {
             file_diff.deinit(self.allocator);
         }
         self.file_diffs.deinit(self.allocator);
-
-        // Clean up old diff_lines (temporary)
-        for (self.diff_lines.items) |line| {
-            self.allocator.free(line.text);
-        }
-        self.diff_lines.deinit(self.allocator);
 
         if (self.pr_title) |title| self.allocator.free(title);
         if (self.pr_author) |author| self.allocator.free(author);
@@ -89,15 +137,16 @@ pub const PRDetailsScreen = struct {
     pub fn handleInput(screen: *Screen, key: vaxis.Key) !void {
         const self = fromBase(screen);
         const half_page = self.visible_area / 2;
+        const total_lines = self.getTotalDisplayLines();
         switch (key.codepoint) {
             'j' => {
-                if (self.selected_index < self.diff_lines.items.len - 1) {
+                if (self.selected_index < total_lines - 1) {
                     // avoids infinite scrolling off the window
                     self.selected_index += 1;
                     // if we are at the bottom of visible area
                     if ((self.selected_index + 1 + self.scroll_offset) % self.visible_area == 0) {
                         const new_offset = self.scroll_offset + half_page;
-                        if (new_offset < self.diff_lines.items.len - 1) {
+                        if (new_offset < total_lines - 1) {
                             self.scroll_offset = new_offset;
                         }
                     }
@@ -141,12 +190,6 @@ pub const PRDetailsScreen = struct {
         }
         self.file_diffs.deinit(self.allocator);
 
-        // Clean up old diff_lines (temporary)
-        for (self.diff_lines.items) |line| {
-            self.allocator.free(line.text);
-        }
-        self.diff_lines.deinit(self.allocator);
-
         if (self.pr_title) |title| self.allocator.free(title);
         if (self.pr_author) |author| self.allocator.free(author);
         if (self.pr) |*pr| pr.deinit(self.allocator);
@@ -162,23 +205,8 @@ pub const PRDetailsScreen = struct {
 
         self.pr = fetched_pr;
 
-        // Get file-organized diffs
+        // Get file-organized diffs with hunks
         self.file_diffs = try self.github_client.fetchPRDiff(self.pr.?);
-
-        // TEMPORARY: Also populate flat diff_lines for backward compatibility
-        // This will be removed once rendering is updated
-        self.diff_lines = std.ArrayList(git.DiffLine){};
-
-        // Flatten file_diffs into diff_lines for now
-        for (self.file_diffs.items) |file_diff| {
-            for (file_diff.lines.items) |line| {
-                const line_copy = try self.allocator.dupe(u8, line.text);
-                try self.diff_lines.append(self.allocator, git.DiffLine{
-                    .text = line_copy,
-                    .kind = line.kind,
-                });
-            }
-        }
 
         self.pr_title = try std.fmt.allocPrint(
             self.allocator,
@@ -263,20 +291,27 @@ pub const PRDetailsScreen = struct {
         var segments = std.ArrayList(vaxis.Segment){};
         defer segments.deinit(self.allocator);
 
-        // TODO: Draw PR description and comments
+        const total_lines = self.getTotalDisplayLines();
         const visible = @min(
-            self.diff_lines.items.len -| self.scroll_offset,
+            total_lines -| self.scroll_offset,
             content.height,
         );
 
         for (0..visible) |i| {
             const idx = self.scroll_offset + i;
-            const diff_line = self.diff_lines.items[idx];
+            const line_info = self.getLineInfo(idx);
             const is_selected = idx == self.selected_index;
 
+            const style = if (is_selected)
+                theme.selected_row_style
+            else if (line_info.is_hunk_header)
+                getDiffStyle(.hunk_header)
+            else
+                getDiffStyle(line_info.kind.?);
+
             const segment = vaxis.Segment{
-                .text = diff_line.text,
-                .style = if (is_selected) theme.selected_row_style else getDiffStyle(diff_line.kind),
+                .text = line_info.text,
+                .style = style,
             };
 
             try segments.append(self.allocator, segment);

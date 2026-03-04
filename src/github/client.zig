@@ -103,23 +103,26 @@ pub const GitHubClient = struct {
             file_diffs.deinit(self.allocator);
         }
 
-        var current_file: ?[]const u8 = null;
-        var current_lines: ?std.ArrayList(git.DiffLine) = null;
-        var lines = std.mem.splitSequence(u8, raw_diff_str, "\n");
+        var current_file: ?git.FileDiff = null;
+        var current_hunk: ?git.Hunk = null;
 
-        while (lines.next()) |line| {
-            const safe = try escapeForDisplay(self.allocator, line);
+        var lines = std.mem.splitScalar(u8, raw_diff_str, '\n');
 
-            // Check if this line starts a new file diff
-            if (git.classify(line) == .file_header) {
-                // Save previous file diff if we have one
-                if (current_file != null and current_lines != null) {
-                    try file_diffs.append(self.allocator, git.FileDiff{
-                        .file_path = current_file.?,
-                        .lines = current_lines.?,
-                    });
+        while (lines.next()) |raw_line| {
+            const line = std.mem.trimRight(u8, raw_line, "\r");
+            //if (line.len == 0) continue; // Skip empty lines
+
+            // Check for file header
+            if (std.mem.startsWith(u8, line, "diff --git")) {
+                // Save previous file if exists
+                if (current_file) |*file| {
+                    // Save previous hunk if exists
+                    if (current_hunk) |*hunk| {
+                        try file.hunks.append(self.allocator, hunk.*);
+                        current_hunk = null;
+                    }
+                    try file_diffs.append(self.allocator, file.*);
                     current_file = null;
-                    current_lines = null;
                 }
 
                 // Extract filename from "diff --git a/path/to/file b/path/to/file"
@@ -128,30 +131,52 @@ pub const GitHubClient = struct {
                     const file_end = line.len;
                     const file_path = line[file_start..file_end];
 
-                    current_file = try self.allocator.dupe(u8, file_path);
-                    current_lines = std.ArrayList(git.DiffLine){};
+                    current_file = git.FileDiff{
+                        .file_path = try self.allocator.dupe(u8, file_path),
+                        .hunks = std.ArrayList(git.Hunk){},
+                    };
                 }
+                continue;
             }
 
-            // Add line to current file diff if we have one
-            if (current_file != null and current_lines != null) {
-                const diff_line = git.DiffLine{
-                    .text = safe,
-                    .kind = git.classify(line),
+            // Check for hunk header
+            if (std.mem.startsWith(u8, line, "@@")) {
+                // Save previous hunk if exists
+                if (current_hunk) |*hunk| {
+                    if (current_file) |*file| {
+                        try file.hunks.append(self.allocator, hunk.*);
+                    }
+                    current_hunk = null;
+                }
+
+                // Start new hunk
+                const safe_header = try escapeForDisplay(self.allocator, line);
+                current_hunk = git.Hunk{
+                    .header = safe_header,
+                    .lines = std.ArrayList(git.DiffLine){},
                 };
-                try current_lines.?.append(self.allocator, diff_line);
-            } else {
-                // Free the line if it doesn't belong to any file (shouldn't happen)
-                self.allocator.free(safe);
+                continue;
+            }
+
+            // Handle regular diff lines
+            if (current_hunk) |*hunk| {
+                const kind = git.classify(line);
+                const safe_line = try escapeForDisplay(self.allocator, line);
+                try hunk.lines.append(self.allocator, git.DiffLine{
+                    .kind = kind,
+                    .text = safe_line,
+                });
             }
         }
 
-        // Don't forget the last file diff
-        if (current_file != null and current_lines != null) {
-            try file_diffs.append(self.allocator, git.FileDiff{
-                .file_path = current_file.?,
-                .lines = current_lines.?,
-            });
+        // Save the last file and hunk
+        if (current_hunk) |*hunk| {
+            if (current_file) |*file| {
+                try file.hunks.append(self.allocator, hunk.*);
+            }
+        }
+        if (current_file) |*file| {
+            try file_diffs.append(self.allocator, file.*);
         }
 
         return file_diffs;

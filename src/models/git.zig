@@ -14,12 +14,12 @@ pub const DiffLine = struct {
     text: []const u8, // slice into raw patch
 };
 
-pub const FileDiff = struct {
-    file_path: []const u8,
+pub const Hunk = struct {
+    header: []const u8, // The "@@ -x,y +a,b @@" line
     lines: std.ArrayList(DiffLine),
 
-    pub fn deinit(self: *FileDiff, allocator: std.mem.Allocator) void {
-        allocator.free(self.file_path);
+    pub fn deinit(self: *Hunk, allocator: std.mem.Allocator) void {
+        allocator.free(self.header);
         for (self.lines.items) |line| {
             allocator.free(line.text);
         }
@@ -27,12 +27,22 @@ pub const FileDiff = struct {
     }
 };
 
+pub const FileDiff = struct {
+    file_path: []const u8,
+    hunks: std.ArrayList(Hunk),
+
+    pub fn deinit(self: *FileDiff, allocator: std.mem.Allocator) void {
+        allocator.free(self.file_path);
+        for (self.hunks.items) |*hunk| {
+            hunk.deinit(allocator);
+        }
+        self.hunks.deinit(allocator);
+    }
+};
+
 pub fn classify(line: []const u8) DiffLineKind {
     if (std.mem.startsWith(u8, line, "diff --git"))
         return .file_header;
-
-    if (std.mem.startsWith(u8, line, "@@"))
-        return .hunk_header;
 
     if (std.mem.startsWith(u8, line, "+") and
         !std.mem.startsWith(u8, line, "+++"))
