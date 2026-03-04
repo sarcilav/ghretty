@@ -34,7 +34,8 @@ pub const PRDetailsScreen = struct {
     visible_area: usize = 10, // use a default value that will be computed on the first render cycle
     loading: bool = true,
     err_msg: ?[]const u8 = null,
-    diff_lines: std.ArrayList(git.DiffLine),
+    file_diffs: std.ArrayList(git.FileDiff), // NEW: organized by file
+    diff_lines: std.ArrayList(git.DiffLine), // OLD: flat list (temporary)
     pr_title: ?[]const u8 = null,
     pr_author: ?[]const u8 = null,
 
@@ -44,19 +45,30 @@ pub const PRDetailsScreen = struct {
         const github_client = try allocator.create(GitHubClient);
         github_client.* = GitHubClient.init(allocator);
 
-        const diff_lines = std.ArrayList(git.DiffLine){};
+        const file_diffs = std.ArrayList(git.FileDiff){};
+        const diff_lines = std.ArrayList(git.DiffLine){}; // Keep for now
+
         self.* = .{
             .base = .{ .vtable = &vtable },
             .allocator = allocator,
             .github_client = github_client,
             .pr_number = pr_number,
-            .diff_lines = diff_lines,
+            .file_diffs = file_diffs, // NEW
+            .diff_lines = diff_lines, // Keep for compatibility
         };
         return &self.base;
     }
 
     pub fn deinit(screen: *Screen) void {
         const self = fromBase(screen);
+
+        // Clean up file_diffs
+        for (self.file_diffs.items) |*file_diff| {
+            file_diff.deinit(self.allocator);
+        }
+        self.file_diffs.deinit(self.allocator);
+
+        // Clean up old diff_lines (temporary)
         for (self.diff_lines.items) |line| {
             self.allocator.free(line.text);
         }
@@ -123,7 +135,13 @@ pub const PRDetailsScreen = struct {
     fn loadPRDetails(self: *@This()) !void {
         defer self.loading = false;
 
-        // avoid leaking previous allocations
+        // Clean up file_diffs
+        for (self.file_diffs.items) |*file_diff| {
+            file_diff.deinit(self.allocator);
+        }
+        self.file_diffs.deinit(self.allocator);
+
+        // Clean up old diff_lines (temporary)
         for (self.diff_lines.items) |line| {
             self.allocator.free(line.text);
         }
@@ -144,8 +162,23 @@ pub const PRDetailsScreen = struct {
 
         self.pr = fetched_pr;
 
-        // TODO handle fetchPRDiff errors
-        self.diff_lines = try self.github_client.fetchPRDiff(self.pr.?);
+        // Get file-organized diffs
+        self.file_diffs = try self.github_client.fetchPRDiff(self.pr.?);
+
+        // TEMPORARY: Also populate flat diff_lines for backward compatibility
+        // This will be removed once rendering is updated
+        self.diff_lines = std.ArrayList(git.DiffLine){};
+
+        // Flatten file_diffs into diff_lines for now
+        for (self.file_diffs.items) |file_diff| {
+            for (file_diff.lines.items) |line| {
+                const line_copy = try self.allocator.dupe(u8, line.text);
+                try self.diff_lines.append(self.allocator, git.DiffLine{
+                    .text = line_copy,
+                    .kind = line.kind,
+                });
+            }
+        }
 
         self.pr_title = try std.fmt.allocPrint(
             self.allocator,

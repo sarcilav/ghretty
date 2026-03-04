@@ -30,11 +30,11 @@ pub const GitHubClient = struct {
         return try self.parsePRDetails(result);
     }
 
-    pub fn fetchPRDiff(self: *@This(), pr: PR) !std.ArrayList(git.DiffLine) {
+    pub fn fetchPRDiff(self: *@This(), pr: PR) !std.ArrayList(git.FileDiff) {
         const pr_str = try std.fmt.allocPrint(self.allocator, "{}", .{pr.number});
         defer self.allocator.free(pr_str);
 
-        const raw_diff = try self.runGhCommand(&.{ "pr", "diff", pr_str });//, "--patch" });
+        const raw_diff = try self.runGhCommand(&.{ "pr", "diff", pr_str }); //, "--patch" });
         defer self.allocator.free(raw_diff);
 
         return try self.parsePRDiff(raw_diff);
@@ -94,22 +94,67 @@ pub const GitHubClient = struct {
         return stdout;
     }
 
-    fn parsePRDiff(self: *@This(), raw_diff_str: []const u8) !std.ArrayList(git.DiffLine) {
-        var diff_lines = std.ArrayList(git.DiffLine){};
+    fn parsePRDiff(self: *@This(), raw_diff_str: []const u8) !std.ArrayList(git.FileDiff) {
+        var file_diffs = std.ArrayList(git.FileDiff){};
         errdefer {
-            diff_lines.deinit(self.allocator);
+            for (file_diffs.items) |*file_diff| {
+                file_diff.deinit(self.allocator);
+            }
+            file_diffs.deinit(self.allocator);
         }
+
+        var current_file: ?[]const u8 = null;
+        var current_lines: ?std.ArrayList(git.DiffLine) = null;
         var lines = std.mem.splitSequence(u8, raw_diff_str, "\n");
+
         while (lines.next()) |line| {
             const safe = try escapeForDisplay(self.allocator, line);
 
-            const diff_line = git.DiffLine{
-                .text = safe,
-                .kind = git.classify(line),
-            };
-            try diff_lines.append(self.allocator, diff_line);
+            // Check if this line starts a new file diff
+            if (git.classify(line) == .file_header) {
+                // Save previous file diff if we have one
+                if (current_file != null and current_lines != null) {
+                    try file_diffs.append(self.allocator, git.FileDiff{
+                        .file_path = current_file.?,
+                        .lines = current_lines.?,
+                    });
+                    current_file = null;
+                    current_lines = null;
+                }
+
+                // Extract filename from "diff --git a/path/to/file b/path/to/file"
+                if (std.mem.indexOf(u8, line, " b/")) |b_pos| {
+                    const file_start = b_pos + 3; // Skip " b/"
+                    const file_end = line.len;
+                    const file_path = line[file_start..file_end];
+
+                    current_file = try self.allocator.dupe(u8, file_path);
+                    current_lines = std.ArrayList(git.DiffLine){};
+                }
+            }
+
+            // Add line to current file diff if we have one
+            if (current_file != null and current_lines != null) {
+                const diff_line = git.DiffLine{
+                    .text = safe,
+                    .kind = git.classify(line),
+                };
+                try current_lines.?.append(self.allocator, diff_line);
+            } else {
+                // Free the line if it doesn't belong to any file (shouldn't happen)
+                self.allocator.free(safe);
+            }
         }
-        return diff_lines;
+
+        // Don't forget the last file diff
+        if (current_file != null and current_lines != null) {
+            try file_diffs.append(self.allocator, git.FileDiff{
+                .file_path = current_file.?,
+                .lines = current_lines.?,
+            });
+        }
+
+        return file_diffs;
     }
 
     fn escapeForDisplay(
