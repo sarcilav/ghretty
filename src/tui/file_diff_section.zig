@@ -132,6 +132,64 @@ pub const FileDiffSection = struct {
         };
     }
 
+    fn findLineIndexForHunkHeader(self: *@This(), file_idx: usize, hunk_idx: usize) usize {
+        var current_idx: usize = 0;
+        for (self.file_diffs.items, 0..) |file_diff, diff_idx| {
+            if (diff_idx == file_idx) {
+                current_idx += 1; // Skip file header
+
+                for (file_diff.hunks.items, 0..) |_, current_hunk_idx| {
+                    if (current_hunk_idx == hunk_idx) {
+                        return current_idx;
+                    }
+                    current_idx += 1; // Skip hunk header
+
+                    // Skip hunk lines if not collapsed
+                    if (!file_diff.hunks.items[current_hunk_idx].collapsed) {
+                        current_idx += file_diff.hunks.items[current_hunk_idx].lines.items.len;
+                    }
+                }
+                break;
+            }
+            current_idx += 1; // Skip file header
+
+            if (!file_diff.collapsed) {
+                for (file_diff.hunks.items) |hunk| {
+                    current_idx += 1; // Skip hunk header
+                    if (!hunk.collapsed) {
+                        current_idx += hunk.lines.items.len;
+                    }
+                }
+            }
+        }
+        return 0; // Fallback
+    }
+
+    fn adjustScrollOffsetForSelected(self: *@This(), total_lines: usize) void {
+        // Ensure selected index is within bounds
+        if (self.selected_index >= total_lines) {
+            self.selected_index = if (total_lines > 0) total_lines - 1 else 0;
+        }
+
+        // Adjust scroll offset to make selected item visible
+        if (self.selected_index < self.scroll_offset) {
+            // Selected item is above visible area
+            self.scroll_offset = self.selected_index;
+        } else if (self.selected_index >= self.scroll_offset + self.visible_area) {
+            // Selected item is below visible area
+            self.scroll_offset = self.selected_index - self.visible_area + 1;
+        }
+
+        // Ensure scroll offset is valid
+        if (self.scroll_offset + self.visible_area > total_lines) {
+            if (total_lines > self.visible_area) {
+                self.scroll_offset = total_lines - self.visible_area;
+            } else {
+                self.scroll_offset = 0;
+            }
+        }
+    }
+
     fn handleInput(data: *anyopaque, key: vaxis.Key) void {
         const self: *@This() = @ptrCast(@alignCast(data));
         const half_page = self.visible_area / 2;
@@ -148,6 +206,8 @@ pub const FileDiffSection = struct {
                         }
                     }
                 }
+                // Ensure selected item is visible after navigation
+                self.adjustScrollOffsetForSelected(total_lines);
             },
             'k' => {
                 if (self.selected_index > 0) {
@@ -160,6 +220,8 @@ pub const FileDiffSection = struct {
                     }
                     self.selected_index -= 1;
                 }
+                // Ensure selected item is visible after navigation
+                self.adjustScrollOffsetForSelected(total_lines);
             },
             '\t' => {
                 // Toggle hunk or file at
@@ -169,13 +231,22 @@ pub const FileDiffSection = struct {
                     switch (kind) {
                         .file_header => {
                             file_diff.collapsed = !file_diff.collapsed;
+                            // Selected index already points to the file header, no change needed
                         },
                         else => {
                             const hunk = &file_diff.hunks.items[line_info.hunk_idx.?];
                             hunk.collapsed = !hunk.collapsed;
+                            // Set selected index to the hunk header
+                            self.selected_index = self.findLineIndexForHunkHeader(
+                                line_info.file_diff_idx.?,
+                                line_info.hunk_idx.?,
+                            );
                         },
                     }
                 }
+                // Adjust scroll offset to ensure selected item is visible
+                // after toggling collapsing
+                self.adjustScrollOffsetForSelected(self.getTotalDisplayLines());
             },
             else => {},
         }

@@ -38,7 +38,7 @@ pub const FileOperation = enum {
 pub const FileDiff = struct {
     file_path: []const u8,
     hunks: std.ArrayList(Hunk),
-    collapsed: bool = false,
+    collapsed: bool = true,
     operation: FileOperation = .modified, // NEW: default to modified
 
     pub fn deinit(self: *FileDiff, allocator: std.mem.Allocator) void {
