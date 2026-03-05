@@ -53,21 +53,19 @@ pub const PRDetailsScreen = struct {
 
     // Helper function to get line info at index
     fn getLineInfo(self: *@This(), index: usize) struct {
-        is_hunk_header: bool,
         text: []const u8,
         kind: ?git.DiffLineKind,
     } {
         var current_idx: usize = 0;
         for (self.file_diffs.items) |file_diff| {
             if (current_idx == index) {
-                return .{ .is_hunk_header = false, .text = file_diff.file_path, .kind = .file_header };
+                return .{ .text = file_diff.file_path, .kind = .file_header };
             }
             current_idx += 1;
             for (file_diff.hunks.items) |hunk| {
                 // Check hunk header
                 if (current_idx == index) {
                     return .{
-                        .is_hunk_header = true,
                         .text = hunk.header,
                         .kind = .hunk_header,
                     };
@@ -78,7 +76,6 @@ pub const PRDetailsScreen = struct {
                 for (hunk.lines.items) |line| {
                     if (current_idx == index) {
                         return .{
-                            .is_hunk_header = false,
                             .text = line.text,
                             .kind = line.kind,
                         };
@@ -89,7 +86,6 @@ pub const PRDetailsScreen = struct {
         }
         // Return empty if index out of bounds
         return .{
-            .is_hunk_header = false,
             .text = "",
             .kind = null,
         };
@@ -164,6 +160,7 @@ pub const PRDetailsScreen = struct {
                     self.selected_index -= 1;
                 }
             },
+            '\t' => {},
             'r' => {
                 self.loading = true;
                 self.err_msg = null;
@@ -304,10 +301,16 @@ pub const PRDetailsScreen = struct {
 
             const style = if (is_selected)
                 theme.selected_row_style
-            else if (line_info.is_hunk_header)
-                getDiffStyle(.hunk_header)
             else
                 getDiffStyle(line_info.kind.?);
+
+            if (line_info.kind) |kind| {
+                if (kind == .file_header or kind == .hunk_header)
+                    try segments.append(self.allocator, vaxis.Segment{
+                        .text = ">",
+                        .style = style,
+                    });
+            }
 
             const segment = vaxis.Segment{
                 .text = line_info.text,

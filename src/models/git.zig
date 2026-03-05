@@ -17,6 +17,7 @@ pub const DiffLine = struct {
 pub const Hunk = struct {
     header: []const u8, // The "@@ -x,y +a,b @@" line
     lines: std.ArrayList(DiffLine),
+    collapsed: bool = false,
 
     pub fn deinit(self: *Hunk, allocator: std.mem.Allocator) void {
         allocator.free(self.header);
@@ -30,6 +31,7 @@ pub const Hunk = struct {
 pub const FileDiff = struct {
     file_path: []const u8,
     hunks: std.ArrayList(Hunk),
+    collapsed: bool = false,
 
     pub fn deinit(self: *FileDiff, allocator: std.mem.Allocator) void {
         allocator.free(self.file_path);
