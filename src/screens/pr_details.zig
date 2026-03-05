@@ -6,22 +6,8 @@ const git = @import("../models/git.zig");
 const GitHubClient = @import("../github/client.zig").GitHubClient;
 const layout = @import("../tui/layout.zig");
 const theme = @import("../tui/theme.zig");
-
-// Build a lookup table at comptime
-const diff_styles = theme.diff_line_styles{};
-const diff_style_map = std.enums.directEnumArray(git.DiffLineKind, vaxis.Style, 10, .{
-    .file_header = diff_styles.file,
-    .hunk_header = diff_styles.hunk,
-    .added = diff_styles.add,
-    .removed = diff_styles.remove,
-    .context = diff_styles.normal,
-    .meta = diff_styles.meta,
-});
-
-// Now use it at runtime
-pub fn getDiffStyle(kind: git.DiffLineKind) vaxis.Style {
-    return diff_style_map[@intFromEnum(kind)];
-}
+const Section = @import("../tui/section.zig").Section;  // NEW
+const FileDiffSection = @import("../tui/file_diff_section.zig").FileDiffSection;  // NEW
 
 pub const PRDetailsScreen = struct {
     base: Screen,
@@ -29,67 +15,14 @@ pub const PRDetailsScreen = struct {
     github_client: *GitHubClient,
     pr_number: u32 = 0,
     pr: ?PR = null,
-    selected_index: usize = 0,
-    scroll_offset: usize = 0,
-    visible_area: usize = 10, // use a default value that will be computed on the first render cycle
+    diff_section: ?*Section = null,  // NEW: Polymorphic section
     loading: bool = true,
     err_msg: ?[]const u8 = null,
     file_diffs: std.ArrayList(git.FileDiff),
     pr_title: ?[]const u8 = null,
     pr_author: ?[]const u8 = null,
 
-    // Helper function to get total display lines
-    fn getTotalDisplayLines(self: *@This()) usize {
-        var total: usize = 0;
-        for (self.file_diffs.items) |file_diff| {
-            total += 1; // file header
-            for (file_diff.hunks.items) |hunk| {
-                total += 1; // Hunk header
-                total += hunk.lines.items.len;
-            }
-        }
-        return total;
-    }
-
-    // Helper function to get line info at index
-    fn getLineInfo(self: *@This(), index: usize) struct {
-        text: []const u8,
-        kind: ?git.DiffLineKind,
-    } {
-        var current_idx: usize = 0;
-        for (self.file_diffs.items) |file_diff| {
-            if (current_idx == index) {
-                return .{ .text = file_diff.file_path, .kind = .file_header };
-            }
-            current_idx += 1;
-            for (file_diff.hunks.items) |hunk| {
-                // Check hunk header
-                if (current_idx == index) {
-                    return .{
-                        .text = hunk.header,
-                        .kind = .hunk_header,
-                    };
-                }
-                current_idx += 1;
-
-                // Check lines in hunk
-                for (hunk.lines.items) |line| {
-                    if (current_idx == index) {
-                        return .{
-                            .text = line.text,
-                            .kind = line.kind,
-                        };
-                    }
-                    current_idx += 1;
-                }
-            }
-        }
-        // Return empty if index out of bounds
-        return .{
-            .text = "",
-            .kind = null,
-        };
-    }
+    // Remove getTotalDisplayLines and getLineInfo methods
 
     pub fn create(allocator: std.mem.Allocator, pr_number: u32) !*Screen {
         const self = try allocator.create(@This());
@@ -104,6 +37,7 @@ pub const PRDetailsScreen = struct {
             .allocator = allocator,
             .github_client = github_client,
             .pr_number = pr_number,
+            .diff_section = null,
             .file_diffs = file_diffs,
         };
         return &self.base;
@@ -111,6 +45,11 @@ pub const PRDetailsScreen = struct {
 
     pub fn deinit(screen: *Screen) void {
         const self = fromBase(screen);
+
+        // Clean up diff_section if it exists
+        if (self.diff_section) |diff_section| {
+            diff_section.deinit();
+        }
 
         // Clean up file_diffs
         for (self.file_diffs.items) |*file_diff| {
@@ -130,36 +69,22 @@ pub const PRDetailsScreen = struct {
         const self = fromBase(screen);
         return &self.base;
     }
+
     pub fn handleInput(screen: *Screen, key: vaxis.Key) !void {
         const self = fromBase(screen);
-        const half_page = self.visible_area / 2;
-        const total_lines = self.getTotalDisplayLines();
+        
+        // Delegate to diff section for navigation keys
+        if (self.diff_section) |diff_section| {
+            switch (key.codepoint) {
+                'j', 'k' => {
+                    diff_section.handleInput(key);
+                    return;
+                },
+                else => {},
+            }
+        }
+        
         switch (key.codepoint) {
-            'j' => {
-                if (self.selected_index < total_lines - 1) {
-                    // avoids infinite scrolling off the window
-                    self.selected_index += 1;
-                    // if we are at the bottom of visible area
-                    if ((self.selected_index + 1 + self.scroll_offset) % self.visible_area == 0) {
-                        const new_offset = self.scroll_offset + half_page;
-                        if (new_offset < total_lines - 1) {
-                            self.scroll_offset = new_offset;
-                        }
-                    }
-                }
-            },
-            'k' => {
-                if (self.selected_index > 0) {
-                    if (self.selected_index == self.scroll_offset) {
-                        if (self.scroll_offset > half_page) {
-                            self.scroll_offset -= half_page;
-                        } else {
-                            self.scroll_offset = 0;
-                        }
-                    }
-                    self.selected_index -= 1;
-                }
-            },
             '\t' => {},
             'r' => {
                 self.loading = true;
@@ -176,10 +101,21 @@ pub const PRDetailsScreen = struct {
         if (self.loading) {
             try self.loadPRDetails();
         }
+        
+        // Update diff section if it exists
+        if (self.diff_section) |diff_section| {
+            try diff_section.update();
+        }
     }
 
     fn loadPRDetails(self: *@This()) !void {
         defer self.loading = false;
+
+        // Clean up existing diff_section
+        if (self.diff_section) |diff_section| {
+            diff_section.deinit();
+            self.diff_section = null;
+        }
 
         // Clean up file_diffs
         for (self.file_diffs.items) |*file_diff| {
@@ -205,6 +141,9 @@ pub const PRDetailsScreen = struct {
         // Get file-organized diffs with hunks
         self.file_diffs = try self.github_client.fetchPRDiff(self.pr.?);
 
+        // Create diff section with the file diffs
+        self.diff_section = try FileDiffSection.create(self.allocator, self.file_diffs);
+
         self.pr_title = try std.fmt.allocPrint(
             self.allocator,
             "PR #{}: {s}",
@@ -216,8 +155,6 @@ pub const PRDetailsScreen = struct {
             "\nAuthor: @{s}",
             .{self.pr.?.author},
         );
-        self.scroll_offset = 0;
-        self.selected_index = 0;
     }
 
     pub fn render(screen: *Screen, window: vaxis.Window) !void {
@@ -242,7 +179,6 @@ pub const PRDetailsScreen = struct {
             w,
             h - 8,
         ));
-        self.visible_area = content.height;
 
         // --- Footer ---
         var footer = window.child(layout.rect(
@@ -285,47 +221,12 @@ pub const PRDetailsScreen = struct {
             return;
         }
 
-        var segments = std.ArrayList(vaxis.Segment){};
-        defer segments.deinit(self.allocator);
-
-        const total_lines = self.getTotalDisplayLines();
-        const visible = @min(
-            total_lines -| self.scroll_offset,
-            content.height,
-        );
-
-        for (0..visible) |i| {
-            const idx = self.scroll_offset + i;
-            const line_info = self.getLineInfo(idx);
-            const is_selected = idx == self.selected_index;
-
-            const style = if (is_selected)
-                theme.selected_row_style
-            else
-                getDiffStyle(line_info.kind.?);
-
-            if (line_info.kind) |kind| {
-                if (kind == .file_header or kind == .hunk_header)
-                    try segments.append(self.allocator, vaxis.Segment{
-                        .text = ">",
-                        .style = style,
-                    });
-            }
-
-            const segment = vaxis.Segment{
-                .text = line_info.text,
-                .style = style,
-            };
-
-            try segments.append(self.allocator, segment);
-
-            // Add newline segment (except after last line)
-            if (i < visible - 1) {
-                try segments.append(self.allocator, .{ .text = "\n", .style = theme.normal_style });
-            }
+        // =====================
+        // Render diff section
+        // =====================
+        if (self.diff_section) |diff_section| {
+            try diff_section.render(content);
         }
-
-        _ = content.print(segments.items, .{});
 
         // =====================
         // Footer
