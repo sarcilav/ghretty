@@ -39,3 +39,10 @@ pub const diff_line_styles = struct {
     meta: vaxis.Style = .{ .fg = .{ .index = 6 } },
     normal: vaxis.Style = .{},
 };
+
+pub const file_operation_styles = struct {
+    added: vaxis.Style = .{ .fg = .{ .index = 2 }, .bold = true }, // Green
+    deleted: vaxis.Style = .{ .fg = .{ .index = 1 }, .bold = true }, // Red
+    renamed: vaxis.Style = .{ .fg = .{ .index = 6 }, .bold = true }, // Cyan
+    modified: vaxis.Style = .{ .fg = .{ .index = 3 }, .bold = true }, // Yellow
+};

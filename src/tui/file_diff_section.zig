@@ -19,6 +19,25 @@ fn getDiffStyle(kind: git.DiffLineKind) vaxis.Style {
     return diff_style_map[@intFromEnum(kind)];
 }
 
+fn getFileOperationSymbol(operation: git.FileOperation) []const u8 {
+    return switch (operation) {
+        .added => "[+]",
+        .deleted => "[-]",
+        .renamed => "[→]",
+        .modified => "[~]",
+    };
+}
+
+fn getFileOperationStyle(operation: git.FileOperation) vaxis.Style {
+    const op_styles = theme.file_operation_styles{};
+    return switch (operation) {
+        .added => op_styles.added,
+        .deleted => op_styles.deleted,
+        .renamed => op_styles.renamed,
+        .modified => op_styles.modified,
+    };
+}
+
 pub const FileDiffSection = struct {
     base: Section,
     allocator: std.mem.Allocator,
@@ -52,11 +71,17 @@ pub const FileDiffSection = struct {
     fn getLineInfo(self: *@This(), index: usize) struct {
         text: []const u8,
         kind: ?git.DiffLineKind,
+        file_operation: ?git.FileOperation = null,
     } {
         var current_idx: usize = 0;
         for (self.file_diffs.items) |file_diff| {
+            const operation = file_diff.operation;
             if (current_idx == index) {
-                return .{ .text = file_diff.file_path, .kind = .file_header };
+                return .{
+                    .text = file_diff.file_path,
+                    .kind = .file_header,
+                    .file_operation = operation,
+                };
             }
             current_idx += 1;
             for (file_diff.hunks.items) |hunk| {
@@ -154,6 +179,13 @@ pub const FileDiffSection = struct {
                         .text = "⌄",
                         .style = style,
                     });
+
+                    if (line_info.file_operation) |operation| {
+                        try segments.append(self.allocator, vaxis.Segment{
+                            .text = getFileOperationSymbol(operation),
+                            .style = getFileOperationStyle(operation),
+                        });
+                    }
                 }
 
                 try segments.append(self.allocator, vaxis.Segment{

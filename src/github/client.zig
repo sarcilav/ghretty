@@ -105,12 +105,13 @@ pub const GitHubClient = struct {
 
         var current_file: ?git.FileDiff = null;
         var current_hunk: ?git.Hunk = null;
+        var current_file_lines = std.ArrayList([]const u8){};
+        defer current_file_lines.deinit(self.allocator);
 
         var lines = std.mem.splitScalar(u8, raw_diff_str, '\n');
 
         while (lines.next()) |raw_line| {
             const line = std.mem.trimRight(u8, raw_line, "\r");
-            //if (line.len == 0) continue; // Skip empty lines
 
             // Check for file header
             if (std.mem.startsWith(u8, line, "diff --git")) {
@@ -121,8 +122,12 @@ pub const GitHubClient = struct {
                         try file.hunks.append(self.allocator, hunk.*);
                         current_hunk = null;
                     }
+
+                    // Determine file operation from collected lines
+                    file.operation = git.parseFileOperation(current_file_lines.items); // NEW
                     try file_diffs.append(self.allocator, file.*);
                     current_file = null;
+                    current_file_lines.clearRetainingCapacity(); // NEW: clear for next file
                 }
 
                 // Extract filename from "diff --git a/path/to/file b/path/to/file"
@@ -136,7 +141,15 @@ pub const GitHubClient = struct {
                         .hunks = std.ArrayList(git.Hunk){},
                     };
                 }
+
+                // Add this line to current file lines for operation detection
+                try current_file_lines.append(self.allocator, line);
                 continue;
+            }
+
+            // Add line to current file lines for operation detection
+            if (current_file != null) {
+                try current_file_lines.append(self.allocator, line);
             }
 
             // Check for hunk header
@@ -176,6 +189,8 @@ pub const GitHubClient = struct {
             }
         }
         if (current_file) |*file| {
+            // Determine operation for the last file
+            file.operation = git.parseFileOperation(current_file_lines.items); // NEW
             try file_diffs.append(self.allocator, file.*);
         }
 
