@@ -142,6 +142,10 @@ pub const FileDiffSection = struct {
                     self.selected_index -= 1;
                 }
             },
+            '\t' => {
+                // Toggle hunk or file at
+
+            },
             else => {},
         }
     }

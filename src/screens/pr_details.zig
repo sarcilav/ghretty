@@ -6,8 +6,8 @@ const git = @import("../models/git.zig");
 const GitHubClient = @import("../github/client.zig").GitHubClient;
 const layout = @import("../tui/layout.zig");
 const theme = @import("../tui/theme.zig");
-const Section = @import("../tui/section.zig").Section;  // NEW
-const FileDiffSection = @import("../tui/file_diff_section.zig").FileDiffSection;  // NEW
+const Section = @import("../tui/section.zig").Section;
+const FileDiffSection = @import("../tui/file_diff_section.zig").FileDiffSection;
 
 pub const PRDetailsScreen = struct {
     base: Screen,
@@ -15,14 +15,12 @@ pub const PRDetailsScreen = struct {
     github_client: *GitHubClient,
     pr_number: u32 = 0,
     pr: ?PR = null,
-    diff_section: ?*Section = null,  // NEW: Polymorphic section
+    diff_section: ?*Section = null,
     loading: bool = true,
     err_msg: ?[]const u8 = null,
     file_diffs: std.ArrayList(git.FileDiff),
     pr_title: ?[]const u8 = null,
     pr_author: ?[]const u8 = null,
-
-    // Remove getTotalDisplayLines and getLineInfo methods
 
     pub fn create(allocator: std.mem.Allocator, pr_number: u32) !*Screen {
         const self = try allocator.create(@This());
@@ -72,20 +70,19 @@ pub const PRDetailsScreen = struct {
 
     pub fn handleInput(screen: *Screen, key: vaxis.Key) !void {
         const self = fromBase(screen);
-        
+
         // Delegate to diff section for navigation keys
         if (self.diff_section) |diff_section| {
             switch (key.codepoint) {
-                'j', 'k' => {
+                'j', 'k', '\t' => {
                     diff_section.handleInput(key);
                     return;
                 },
                 else => {},
             }
         }
-        
+
         switch (key.codepoint) {
-            '\t' => {},
             'r' => {
                 self.loading = true;
                 self.err_msg = null;
@@ -101,7 +98,7 @@ pub const PRDetailsScreen = struct {
         if (self.loading) {
             try self.loadPRDetails();
         }
-        
+
         // Update diff section if it exists
         if (self.diff_section) |diff_section| {
             try diff_section.update();
