@@ -19,12 +19,16 @@ fn getDiffStyle(kind: git.DiffLineKind) vaxis.Style {
     return diff_style_map[@intFromEnum(kind)];
 }
 
+fn getCollapsableSymbol(state: bool) []const u8 {
+    if (state) return "➤" else return "⌄";
+}
+
 fn getFileOperationSymbol(operation: git.FileOperation) []const u8 {
     return switch (operation) {
-        .added => "[+]",
-        .deleted => "[-]",
-        .renamed => "[→]",
-        .modified => "[~]",
+        .added => " [added] ",
+        .deleted => " [deleted] ",
+        .renamed => " [renamed] ",
+        .modified => " [modified] ",
     };
 }
 
@@ -60,8 +64,14 @@ pub const FileDiffSection = struct {
         var total: usize = 0;
         for (self.file_diffs.items) |file_diff| {
             total += 1; // file header
+
+            if (file_diff.collapsed) continue;
+
             for (file_diff.hunks.items) |hunk| {
                 total += 1; // Hunk header
+
+                if (hunk.collapsed) continue;
+
                 total += hunk.lines.items.len;
             }
         }
@@ -71,28 +81,35 @@ pub const FileDiffSection = struct {
     fn getLineInfo(self: *@This(), index: usize) struct {
         text: []const u8,
         kind: ?git.DiffLineKind,
-        file_operation: ?git.FileOperation = null,
+        file_diff_idx: ?usize = 0,
+        hunk_idx: ?usize = null,
     } {
         var current_idx: usize = 0;
-        for (self.file_diffs.items) |file_diff| {
-            const operation = file_diff.operation;
+        for (self.file_diffs.items, 0..) |file_diff, diff_idx| {
             if (current_idx == index) {
                 return .{
                     .text = file_diff.file_path,
                     .kind = .file_header,
-                    .file_operation = operation,
+                    .file_diff_idx = diff_idx,
                 };
             }
             current_idx += 1;
-            for (file_diff.hunks.items) |hunk| {
+
+            if (file_diff.collapsed) continue;
+
+            for (file_diff.hunks.items, 0..) |hunk, hunk_idx| {
                 // Check hunk header
                 if (current_idx == index) {
                     return .{
                         .text = hunk.header,
                         .kind = .hunk_header,
+                        .file_diff_idx = diff_idx,
+                        .hunk_idx = hunk_idx,
                     };
                 }
                 current_idx += 1;
+
+                if (hunk.collapsed) continue;
 
                 // Check lines in hunk
                 for (hunk.lines.items) |line| {
@@ -100,6 +117,8 @@ pub const FileDiffSection = struct {
                         return .{
                             .text = line.text,
                             .kind = line.kind,
+                            .file_diff_idx = diff_idx,
+                            .hunk_idx = hunk_idx,
                         };
                     }
                     current_idx += 1;
@@ -144,7 +163,19 @@ pub const FileDiffSection = struct {
             },
             '\t' => {
                 // Toggle hunk or file at
-
+                const line_info = self.getLineInfo(self.selected_index);
+                const file_diff = &self.file_diffs.items[line_info.file_diff_idx.?];
+                if (line_info.kind) |kind| {
+                    switch (kind) {
+                        .file_header => {
+                            file_diff.collapsed = !file_diff.collapsed;
+                        },
+                        else => {
+                            const hunk = &file_diff.hunks.items[line_info.hunk_idx.?];
+                            hunk.collapsed = !hunk.collapsed;
+                        },
+                    }
+                }
             },
             else => {},
         }
@@ -178,16 +209,27 @@ pub const FileDiffSection = struct {
                 else
                     getDiffStyle(kind);
 
-                if (kind == .file_header or kind == .hunk_header) {
-                    try segments.append(self.allocator, vaxis.Segment{
-                        .text = "⌄",
-                        .style = style,
-                    });
+                if (line_info.file_diff_idx) |file_idx| {
+                    const file_diff = self.file_diffs.items[file_idx];
+                    if (kind == .hunk_header) {
+                        if (line_info.hunk_idx) |hunk_idx| {
+                            const hunk = file_diff.hunks.items[hunk_idx];
+                            try segments.append(self.allocator, vaxis.Segment{
+                                .text = getCollapsableSymbol(hunk.collapsed),
+                                .style = style,
+                            });
+                        }
+                    }
 
-                    if (line_info.file_operation) |operation| {
+                    if (kind == .file_header) {
                         try segments.append(self.allocator, vaxis.Segment{
-                            .text = getFileOperationSymbol(operation),
-                            .style = getFileOperationStyle(operation),
+                            .text = getCollapsableSymbol(file_diff.collapsed),
+                            .style = style,
+                        });
+
+                        try segments.append(self.allocator, vaxis.Segment{
+                            .text = getFileOperationSymbol(file_diff.operation),
+                            .style = getFileOperationStyle(file_diff.operation),
                         });
                     }
                 }
