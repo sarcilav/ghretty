@@ -284,15 +284,17 @@ pub const FileDiffSection = struct {
                     const file_diff = self.file_diffs.items[file_idx];
                     if (kind == .hunk_header) {
                         if (line_info.hunk_idx) |hunk_idx| {
+                            try segments.append(self.allocator, vaxis.Segment{
+                                .text = "  ", // doble space to make it look nested
+                                .style = style,
+                            });
                             const hunk = file_diff.hunks.items[hunk_idx];
                             try segments.append(self.allocator, vaxis.Segment{
                                 .text = getCollapsableSymbol(hunk.collapsed),
                                 .style = style,
                             });
                         }
-                    }
-
-                    if (kind == .file_header) {
+                    } else if (kind == .file_header) {
                         try segments.append(self.allocator, vaxis.Segment{
                             .text = getCollapsableSymbol(file_diff.collapsed),
                             .style = style,
@@ -302,7 +304,13 @@ pub const FileDiffSection = struct {
                             .text = getFileOperationSymbol(file_diff.operation),
                             .style = getFileOperationStyle(file_diff.operation),
                         });
-                    }
+                    } // not sure if we should add the diff as nested as well, it makes the review weird
+                    //  else {
+                    //     try segments.append(self.allocator, vaxis.Segment{
+                    //         .text = "    ", // 2xdoble space to make it look nested
+                    //         .style = style,
+                    //     });
+                    // }
                 }
 
                 try segments.append(self.allocator, vaxis.Segment{
