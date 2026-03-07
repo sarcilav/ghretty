@@ -120,9 +120,18 @@ pub const PRDetailsScreen = struct {
         }
         self.file_diffs.deinit(self.allocator);
 
-        if (self.pr_title) |title| self.allocator.free(title);
-        if (self.pr_author) |author| self.allocator.free(author);
-        if (self.pr) |*pr| pr.deinit(self.allocator);
+        if (self.pr_title) |title| {
+            self.allocator.free(title);
+            self.pr_title = null;
+        }
+        if (self.pr_author) |author| {
+            self.allocator.free(author);
+            self.pr_author = null;
+        }
+        if (self.pr) |*pr| {
+            pr.deinit(self.allocator);
+            self.pr = null;
+        }
 
         const fetched_pr = self.github_client.fetchPRDetails(self.pr_number) catch |err| {
             self.err_msg = switch (err) {
