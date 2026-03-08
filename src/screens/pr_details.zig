@@ -8,6 +8,7 @@ const layout = @import("../tui/layout.zig");
 const theme = @import("../tui/theme.zig");
 const Section = @import("../tui/section.zig").Section;
 const FileDiffSection = @import("../tui/file_diff_section.zig").FileDiffSection;
+const PRDescriptionSection = @import("../tui/pr_description_section.zig").PRDescriptionSection;
 
 pub const PRDetailsScreen = struct {
     base: Screen,
@@ -15,12 +16,13 @@ pub const PRDetailsScreen = struct {
     github_client: *GitHubClient,
     pr_number: u32 = 0,
     pr: ?PR = null,
-    diff_section: ?*Section = null,
+    current_section: ?*Section = null,
     loading: bool = true,
     err_msg: ?[]const u8 = null,
     file_diffs: std.ArrayList(git.FileDiff),
     pr_title: ?[]const u8 = null,
     pr_author: ?[]const u8 = null,
+    current_section_type: enum { description, diff } = .description,
 
     pub fn create(allocator: std.mem.Allocator, pr_number: u32) !*Screen {
         const self = try allocator.create(@This());
@@ -35,8 +37,8 @@ pub const PRDetailsScreen = struct {
             .allocator = allocator,
             .github_client = github_client,
             .pr_number = pr_number,
-            .diff_section = null,
             .file_diffs = file_diffs,
+            .current_section_type = .description,
         };
         return &self.base;
     }
@@ -44,9 +46,9 @@ pub const PRDetailsScreen = struct {
     pub fn deinit(screen: *Screen) void {
         const self = fromBase(screen);
 
-        // Clean up diff_section if it exists
-        if (self.diff_section) |diff_section| {
-            diff_section.deinit();
+        // Clean up current_section if it exists
+        if (self.current_section) |section| {
+            section.deinit();
         }
 
         // Clean up file_diffs
@@ -71,24 +73,57 @@ pub const PRDetailsScreen = struct {
     pub fn handleInput(screen: *Screen, key: vaxis.Key) !void {
         const self = fromBase(screen);
 
-        // Delegate to diff section for navigation keys
-        if (self.diff_section) |diff_section| {
-            switch (key.codepoint) {
-                'j', 'k', '\t' => {
-                    diff_section.handleInput(key);
-                    return;
-                },
-                else => {},
-            }
+        // Hotkeys to switch sections
+        switch (key.codepoint) {
+            'd' => {
+                // Switch to description section
+                if (self.current_section_type != .description) {
+                    self.current_section_type = .description;
+                    // Recreate the section if PR is loaded
+                    if (self.pr) |pr| {
+                        if (self.current_section) |section| {
+                            section.deinit();
+                        }
+                        if (pr.body) |body| {
+                            self.current_section = try PRDescriptionSection.create(self.allocator, body);
+                        } else {
+                            self.current_section = null;
+                        }
+                    }
+                }
+                return;
+            },
+            'f' => {
+                // Switch to diff section
+                if (self.current_section_type != .diff) {
+                    self.current_section_type = .diff;
+                    // Recreate the section if PR is loaded
+                    if (self.pr) |_| {
+                        if (self.current_section) |section| {
+                            section.deinit();
+                        }
+                        if (self.file_diffs.items.len > 0) {
+                            self.current_section = try FileDiffSection.create(self.allocator, self.file_diffs);
+                        } else {
+                            self.current_section = null;
+                        }
+                    }
+                }
+                return;
+            },
+            else => {
+                // Pass input to current section
+                if (self.current_section) |section| {
+                    section.handleInput(key);
+                }
+            },
         }
 
-        switch (key.codepoint) {
-            'r' => {
-                self.loading = true;
-                self.err_msg = null;
-                try self.loadPRDetails();
-            },
-            else => {},
+        // Refresh still works
+        if (key.codepoint == 'r') {
+            self.loading = true;
+            self.err_msg = null;
+            try self.loadPRDetails();
         }
     }
 
@@ -99,19 +134,19 @@ pub const PRDetailsScreen = struct {
             try self.loadPRDetails();
         }
 
-        // Update diff section if it exists
-        if (self.diff_section) |diff_section| {
-            try diff_section.update();
+        // Update current section if it exists
+        if (self.current_section) |section| {
+            try section.update();
         }
     }
 
     fn loadPRDetails(self: *@This()) !void {
         defer self.loading = false;
 
-        // Clean up existing diff_section
-        if (self.diff_section) |diff_section| {
-            diff_section.deinit();
-            self.diff_section = null;
+        // Clean up existing section
+        if (self.current_section) |section| {
+            section.deinit();
+            self.current_section = null;
         }
 
         // Clean up file_diffs
@@ -147,9 +182,6 @@ pub const PRDetailsScreen = struct {
         // Get file-organized diffs with hunks
         self.file_diffs = try self.github_client.fetchPRDiff(self.pr.?);
 
-        // Create diff section with the file diffs
-        self.diff_section = try FileDiffSection.create(self.allocator, self.file_diffs);
-
         self.pr_title = try std.fmt.allocPrint(
             self.allocator,
             "PR #{}: {s}",
@@ -161,6 +193,20 @@ pub const PRDetailsScreen = struct {
             "\nAuthor: @{s}",
             .{self.pr.?.author},
         );
+
+        // Create initial section based on current_section_type
+        switch (self.current_section_type) {
+            .description => {
+                if (fetched_pr.body) |body| {
+                    self.current_section = try PRDescriptionSection.create(self.allocator, body);
+                }
+            },
+            .diff => {
+                if (self.file_diffs.items.len > 0) {
+                    self.current_section = try FileDiffSection.create(self.allocator, self.file_diffs);
+                }
+            },
+        }
     }
 
     pub fn render(screen: *Screen, window: vaxis.Window) !void {
@@ -171,54 +217,43 @@ pub const PRDetailsScreen = struct {
         const h = window.height;
 
         // --- Header ---
-        var header = window.child(layout.rect(
-            0,
-            0,
-            w,
-            4,
-        ));
+        var header = window.child(layout.rect(0, 0, w, 4));
+
+        // --- Tabs ---
+        var tabs_area = window.child(layout.rect(0, 4, w, 3));
 
         // --- Content ---
-        var content = window.child(layout.rect(
-            0,
-            4,
-            w,
-            h - 8,
-        ));
+        var content = window.child(layout.rect(0, 7, w, h - 11));
 
         // --- Footer ---
-        var footer = window.child(layout.rect(
-            0,
-            h - 4,
-            w,
-            4,
-        ));
+        var footer = window.child(layout.rect(0, h - 4, w, 4));
 
-        _ = header.print(&.{
-            .{
-                .text = self.pr_title.?,
-            },
-        }, .{});
-
-        _ = header.print(&.{
-            .{
-                .text = self.pr_author.?,
-            },
-        }, .{});
-
-        // =====================
-        // Loading state
-        // =====================
-        if (self.loading) {
-            _ = content.print(&.{
-                .{ .text = "Loading PR..." },
-            }, .{});
-            return;
+        // Render header
+        if (self.pr_title) |title| {
+            _ = header.print(&.{.{ .text = title }}, .{});
+        }
+        if (self.pr_author) |author| {
+            _ = header.print(&.{.{ .text = author }}, .{});
         }
 
-        // =====================
-        // Error state
-        // =====================
+        // Render tabs
+        const desc_active = self.current_section_type == .description;
+        const diff_active = self.current_section_type == .diff;
+
+        const desc_tab = if (desc_active) "[d] Description" else " d  Description";
+        const diff_tab = if (diff_active) "[f] Files" else " f  Files";
+
+        _ = tabs_area.print(&.{
+            .{ .text = desc_tab, .style = if (desc_active) theme.selected_row_style else theme.normal_style },
+            .{ .text = " | ", .style = theme.normal_style },
+            .{ .text = diff_tab, .style = if (diff_active) theme.selected_row_style else theme.normal_style },
+        }, .{});
+
+        // Loading/error states
+        if (self.loading) {
+            _ = content.print(&.{.{ .text = "Loading PR..." }}, .{});
+            return;
+        }
         if (self.err_msg) |err| {
             _ = content.print(&.{
                 .{ .text = "Error: " },
@@ -227,18 +262,24 @@ pub const PRDetailsScreen = struct {
             return;
         }
 
-        // =====================
-        // Render diff section
-        // =====================
-        if (self.diff_section) |diff_section| {
-            try diff_section.render(content);
+        // Render current section if it exists
+        if (self.current_section) |section| {
+            try section.render(content);
+        } else {
+            // No section available (e.g., no description for description section)
+            switch (self.current_section_type) {
+                .description => {
+                    _ = content.print(&.{.{ .text = "No description provided" }}, .{});
+                },
+                .diff => {
+                    _ = content.print(&.{.{ .text = "No files to display" }}, .{});
+                },
+            }
         }
 
-        // =====================
         // Footer
-        // =====================
         _ = footer.print(&.{
-            .{ .text = "j/k: navigate • Enter: open • r: refresh • q: back • ctrl-q: quit" },
+            .{ .text = "d: Description • f: Files • r: refresh • q: back • ctrl-q: quit" },
         }, .{});
     }
 

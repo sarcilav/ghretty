@@ -12,7 +12,7 @@ pub const selected_row_style = vaxis.Style{
 
 pub const normal_style = vaxis.Style{
     .fg = .{ .index = 7 }, // White
-    .bg = .{ .index = 0 }, // Black
+    //.bg = .{ .index = 0 }, // Black
 };
 
 pub const header_style = vaxis.Style{
