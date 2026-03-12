@@ -16,24 +16,24 @@ pub const PRListScreen = struct {
     offset: usize = 0,
     loading: bool = true,
     err_msg: ?[]const u8 = null,
-    lines: std.ArrayListUnmanaged([]u8),
+    visible_pr_numbers: std.ArrayListUnmanaged([]u8),
 
     pub fn create(allocator: std.mem.Allocator) !*Screen {
         const self = try allocator.create(@This());
 
         const github_client = try allocator.create(GitHubClient);
 
-        const lines = std.ArrayListUnmanaged([]u8){};
         github_client.* = GitHubClient.init(allocator);
 
         const prs = std.ArrayList(PR){};
+        const visible_pr_numbers = std.ArrayListUnmanaged([]u8){};
 
         self.* = .{
             .base = .{ .vtable = &vtable },
             .allocator = allocator,
             .github_client = github_client,
             .prs = prs,
-            .lines = lines,
+            .visible_pr_numbers = visible_pr_numbers,
         };
 
         return &self.base;
@@ -42,16 +42,16 @@ pub const PRListScreen = struct {
     fn deinit(screen: *Screen) void {
         const self = fromBase(screen);
 
+        for (self.visible_pr_numbers.items) |numbers| {
+            self.allocator.free(numbers);
+        }
+        self.visible_pr_numbers.deinit(self.allocator);
+
         for (self.prs.items) |*pr| {
             pr.deinit(self.allocator);
         }
-
-        for (self.lines.items) |line| {
-            self.allocator.free(line);
-        }
-        self.lines.deinit(self.allocator);
-
         self.prs.deinit(self.allocator);
+
         self.allocator.destroy(self.github_client);
         self.allocator.destroy(self);
     }
@@ -208,11 +208,11 @@ pub const PRListScreen = struct {
             body.height,
         );
 
-        // Clear existing lines
-        for (self.lines.items) |line| {
-            self.allocator.free(line);
+        // Clear prev pr visible numbers
+        for (self.visible_pr_numbers.items) |numbr| {
+            self.allocator.free(numbr);
         }
-        self.lines.clearRetainingCapacity();
+        self.visible_pr_numbers.clearRetainingCapacity();
 
         // Build segments array
         var segments = std.ArrayList(vaxis.Segment){};
@@ -223,30 +223,44 @@ pub const PRListScreen = struct {
             const pr = self.prs.items[idx];
             const is_selected = idx == self.selected_index;
 
-            // Create line text
-            const line = try std.fmt.allocPrint(
-                self.allocator,
-                "#{d} {s} @{s}",
-                .{ pr.number, pr.title, pr.author },
-            );
+            const base_style = if (is_selected) theme.selected_row_style else theme.normal_style;
 
-            // Store for navigation
-            try self.lines.append(self.allocator, line);
+            // Format PR number into our shared buffer
+            const number_text = try std.fmt.allocPrint(self.allocator, "#{d} ", .{pr.number});
+            try self.visible_pr_numbers.append(self.allocator, number_text);
 
-            // Create segment with appropriate style
-            const segment = vaxis.Segment{
-                .text = line,
-                .style = if (is_selected) theme.selected_row_style else theme.normal_style,
-            };
+            // PR number with cyan style
+            try segments.append(self.allocator, vaxis.Segment{
+                .text = number_text,
+                .style = if (is_selected) theme.selected_row_style else theme.pr_number_style,
+            });
 
-            try segments.append(self.allocator, segment);
+            // PR title with white bold style
+            try segments.append(self.allocator, vaxis.Segment{
+                .text = pr.title,
+                .style = if (is_selected) base_style else theme.pr_title_style,
+            });
 
-            // Add newline segment (except after last line)
+            // Separator
+            try segments.append(self.allocator, vaxis.Segment{
+                .text = " @",
+                .style = base_style,
+            });
+
+            // Author with yellow style
+            try segments.append(self.allocator, vaxis.Segment{
+                .text = pr.author,
+                .style = if (is_selected) base_style else theme.pr_author_style,
+            });
+
+            // Add newline for next item (except after last line)
             if (i < visible - 1) {
-                try segments.append(self.allocator, .{ .text = "\n", .style = theme.normal_style });
+                try segments.append(self.allocator, vaxis.Segment{
+                    .text = "\n",
+                    .style = base_style,
+                });
             }
         }
-
         // Print all segments at once
         _ = body.print(segments.items, .{});
 

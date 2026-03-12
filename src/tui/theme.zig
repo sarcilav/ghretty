@@ -46,3 +46,17 @@ pub const file_operation_styles = struct {
     renamed: vaxis.Style = .{ .fg = .{ .index = 6 }, .bold = true }, // Cyan
     modified: vaxis.Style = .{ .fg = .{ .index = 3 }, .bold = true }, // Yellow
 };
+
+pub const pr_number_style = vaxis.Style{
+    .fg = .{ .index = 6 }, // Cyan
+    .bold = true,
+};
+
+pub const pr_title_style = vaxis.Style{
+    .fg = .{ .index = 7 }, // White
+    .bold = true,
+};
+
+pub const pr_author_style = vaxis.Style{
+    .fg = .{ .index = 3 }, // Yellow
+};
