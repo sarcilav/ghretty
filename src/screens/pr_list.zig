@@ -16,7 +16,7 @@ pub const PRListScreen = struct {
     offset: usize = 0,
     loading: bool = true,
     err_msg: ?[]const u8 = null,
-    visible_pr_numbers: std.ArrayListUnmanaged([]u8),
+    visible_pr_elements: std.ArrayListUnmanaged([]u8),
 
     pub fn create(allocator: std.mem.Allocator) !*Screen {
         const self = try allocator.create(@This());
@@ -26,14 +26,14 @@ pub const PRListScreen = struct {
         github_client.* = GitHubClient.init(allocator);
 
         const prs = std.ArrayList(PR){};
-        const visible_pr_numbers = std.ArrayListUnmanaged([]u8){};
+        const visible_pr_elements = std.ArrayListUnmanaged([]u8){};
 
         self.* = .{
             .base = .{ .vtable = &vtable },
             .allocator = allocator,
             .github_client = github_client,
             .prs = prs,
-            .visible_pr_numbers = visible_pr_numbers,
+            .visible_pr_elements = visible_pr_elements,
         };
 
         return &self.base;
@@ -42,10 +42,10 @@ pub const PRListScreen = struct {
     fn deinit(screen: *Screen) void {
         const self = fromBase(screen);
 
-        for (self.visible_pr_numbers.items) |numbers| {
+        for (self.visible_pr_elements.items) |numbers| {
             self.allocator.free(numbers);
         }
-        self.visible_pr_numbers.deinit(self.allocator);
+        self.visible_pr_elements.deinit(self.allocator);
 
         for (self.prs.items) |*pr| {
             pr.deinit(self.allocator);
@@ -97,6 +97,43 @@ pub const PRListScreen = struct {
         if (self.loading) {
             try self.loadPRs();
         }
+    }
+
+    fn getStatusText(pr: PR) []const u8 {
+        return switch (pr.state) {
+            .open => " OPEN",
+            .closed => "󰅙 CLOSED",
+            .merged => " MERGED",
+        };
+    }
+
+    fn getStatusStyle(pr: PR) vaxis.Style {
+        return switch (pr.state) {
+            .open => theme.success_style,
+            .closed => theme.danger_style,
+            .merged => theme.pr_number_style,
+        };
+    }
+
+    fn getLifecycleBadge(pr: PR) []const u8 {
+        return if (pr.is_draft) " DRAFT" else " READY";
+    }
+
+    fn getLifecycleStyle(pr: PR) vaxis.Style {
+        return if (pr.is_draft) theme.warning_style else theme.success_style;
+    }
+
+    fn getMetaSummary(self: *@This(), pr: PR) !struct {
+        lifecycle_badge: []u8,
+        review_text: []u8,
+    } {
+        return .{
+            .lifecycle_badge = try self.allocator.dupe(u8, getLifecycleBadge(pr)),
+            .review_text = try self.allocator.dupe(
+                u8,
+                if (pr.review_requested) "review requested" else "no review requested",
+            ),
+        };
     }
 
     fn loadPRs(self: *@This()) !void {
@@ -203,16 +240,22 @@ pub const PRListScreen = struct {
             return;
         }
 
-        const visible = @min(
-            self.prs.items.len -| self.offset,
-            body.height,
-        );
+        const block_height: usize = 1;
+        const visible_slots = @max(@as(usize, 1), body.height / block_height);
+
+        if (self.selected_index < self.offset) {
+            self.offset = self.selected_index;
+        } else if (self.selected_index >= self.offset + visible_slots) {
+            self.offset = self.selected_index - visible_slots + 1;
+        }
+
+        const visible = @min(self.prs.items.len -| self.offset, visible_slots);
 
         // Clear prev pr visible numbers
-        for (self.visible_pr_numbers.items) |numbr| {
+        for (self.visible_pr_elements.items) |numbr| {
             self.allocator.free(numbr);
         }
-        self.visible_pr_numbers.clearRetainingCapacity();
+        self.visible_pr_elements.clearRetainingCapacity();
 
         // Build segments array
         var segments = std.ArrayList(vaxis.Segment){};
@@ -224,36 +267,78 @@ pub const PRListScreen = struct {
             const is_selected = idx == self.selected_index;
 
             const base_style = if (is_selected) theme.selected_row_style else theme.normal_style;
+            const muted_style = if (is_selected) theme.selected_row_style else theme.muted_style;
+            const status_style = if (is_selected) theme.selected_row_style else getStatusStyle(pr);
+            const status_text = getStatusText(pr);
 
-            // Format PR number into our shared buffer
-            const number_text = try std.fmt.allocPrint(self.allocator, "#{d} ", .{pr.number});
-            try self.visible_pr_numbers.append(self.allocator, number_text);
+            const number_text = try std.fmt.allocPrint(self.allocator, "#{d}", .{pr.number});
+            try self.visible_pr_elements.append(self.allocator, number_text);
 
-            // PR number with cyan style
+            const meta_text = try std.fmt.allocPrint(self.allocator, "@{s}", .{pr.author});
+            try self.visible_pr_elements.append(self.allocator, meta_text);
+
+            const status_badge = try std.fmt.allocPrint(self.allocator, "[{s}]", .{status_text});
+            try self.visible_pr_elements.append(self.allocator, status_badge);
+
+            const meta_summary = try self.getMetaSummary(pr);
+            try self.visible_pr_elements.append(self.allocator, meta_summary.lifecycle_badge);
+            try self.visible_pr_elements.append(self.allocator, meta_summary.review_text);
+
             try segments.append(self.allocator, vaxis.Segment{
                 .text = number_text,
                 .style = if (is_selected) theme.selected_row_style else theme.pr_number_style,
             });
 
-            // PR title with white bold style
+            try segments.append(self.allocator, vaxis.Segment{
+                .text = " ",
+                .style = base_style,
+            });
+
+            try segments.append(self.allocator, vaxis.Segment{
+                .text = status_badge,
+                .style = status_style,
+            });
+
+            try segments.append(self.allocator, vaxis.Segment{
+                .text = " ",
+                .style = base_style,
+            });
+
             try segments.append(self.allocator, vaxis.Segment{
                 .text = pr.title,
                 .style = if (is_selected) base_style else theme.pr_title_style,
             });
 
-            // Separator
             try segments.append(self.allocator, vaxis.Segment{
-                .text = " @",
+                .text = " ",
                 .style = base_style,
             });
 
-            // Author with yellow style
             try segments.append(self.allocator, vaxis.Segment{
-                .text = pr.author,
+                .text = meta_text,
                 .style = if (is_selected) base_style else theme.pr_author_style,
             });
 
-            // Add newline for next item (except after last line)
+            try segments.append(self.allocator, vaxis.Segment{
+                .text = " ",
+                .style = base_style,
+            });
+
+            try segments.append(self.allocator, vaxis.Segment{
+                .text = meta_summary.lifecycle_badge,
+                .style = if (is_selected) theme.selected_row_style else getLifecycleStyle(pr),
+            });
+
+            try segments.append(self.allocator, vaxis.Segment{
+                .text = " ",
+                .style = base_style,
+            });
+
+            try segments.append(self.allocator, vaxis.Segment{
+                .text = meta_summary.review_text,
+                .style = muted_style,
+            });
+
             if (i < visible - 1) {
                 try segments.append(self.allocator, vaxis.Segment{
                     .text = "\n",
@@ -261,14 +346,13 @@ pub const PRListScreen = struct {
                 });
             }
         }
-        // Print all segments at once
         _ = body.print(segments.items, .{});
 
         // =====================
         // Footer
         // =====================
         _ = footer.print(&.{
-            .{ .text = "j/k: navigate • Enter: open • r: refresh" },
+            .{ .text = "j/k: navigate • Enter: open • r: refresh • q: back" },
         }, .{});
     }
 
