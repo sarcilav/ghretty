@@ -5,6 +5,7 @@ const PRDetailsScreen = @import("pr_details.zig").PRDetailsScreen;
 const PR = @import("../models/pr.zig").PR;
 const GitHubClient = @import("../github/client.zig").GitHubClient;
 const layout = @import("../tui/layout.zig");
+const pr_presentation = @import("../tui/pr_presentation.zig");
 const theme = @import("../tui/theme.zig");
 
 pub const PRListScreen = struct {
@@ -97,43 +98,6 @@ pub const PRListScreen = struct {
         if (self.loading) {
             try self.loadPRs();
         }
-    }
-
-    fn getStatusText(pr: PR) []const u8 {
-        return switch (pr.state) {
-            .open => " OPEN",
-            .closed => "󰅙 CLOSED",
-            .merged => " MERGED",
-        };
-    }
-
-    fn getStatusStyle(pr: PR) vaxis.Style {
-        return switch (pr.state) {
-            .open => theme.success_style,
-            .closed => theme.danger_style,
-            .merged => theme.pr_number_style,
-        };
-    }
-
-    fn getLifecycleBadge(pr: PR) []const u8 {
-        return if (pr.is_draft) " DRAFT" else " READY";
-    }
-
-    fn getLifecycleStyle(pr: PR) vaxis.Style {
-        return if (pr.is_draft) theme.warning_style else theme.success_style;
-    }
-
-    fn getMetaSummary(self: *@This(), pr: PR) !struct {
-        lifecycle_badge: []u8,
-        review_text: []u8,
-    } {
-        return .{
-            .lifecycle_badge = try self.allocator.dupe(u8, getLifecycleBadge(pr)),
-            .review_text = try self.allocator.dupe(
-                u8,
-                if (pr.review_requested) "review requested" else "no review requested",
-            ),
-        };
     }
 
     fn loadPRs(self: *@This()) !void {
@@ -240,6 +204,7 @@ pub const PRListScreen = struct {
             return;
         }
 
+        // logic for multi lines list items
         const block_height: usize = 1;
         const visible_slots = @max(@as(usize, 1), body.height / block_height);
 
@@ -268,8 +233,7 @@ pub const PRListScreen = struct {
 
             const base_style = if (is_selected) theme.selected_row_style else theme.normal_style;
             const muted_style = if (is_selected) theme.selected_row_style else theme.muted_style;
-            const status_style = if (is_selected) theme.selected_row_style else getStatusStyle(pr);
-            const status_text = getStatusText(pr);
+            const status_style = if (is_selected) theme.selected_row_style else pr_presentation.statusStyle(pr);
 
             const number_text = try std.fmt.allocPrint(self.allocator, "#{d}", .{pr.number});
             try self.visible_pr_elements.append(self.allocator, number_text);
@@ -277,12 +241,14 @@ pub const PRListScreen = struct {
             const meta_text = try std.fmt.allocPrint(self.allocator, "@{s}", .{pr.author});
             try self.visible_pr_elements.append(self.allocator, meta_text);
 
-            const status_badge = try std.fmt.allocPrint(self.allocator, "[{s}]", .{status_text});
+            const status_badge = try pr_presentation.allocStatusBadge(self.allocator, pr);
             try self.visible_pr_elements.append(self.allocator, status_badge);
 
-            const meta_summary = try self.getMetaSummary(pr);
-            try self.visible_pr_elements.append(self.allocator, meta_summary.lifecycle_badge);
-            try self.visible_pr_elements.append(self.allocator, meta_summary.review_text);
+            const lifecycle_badge = try self.allocator.dupe(u8, pr_presentation.lifecycleText(pr));
+            try self.visible_pr_elements.append(self.allocator, lifecycle_badge);
+
+            const review_text = try self.allocator.dupe(u8, pr_presentation.reviewText(pr));
+            try self.visible_pr_elements.append(self.allocator, review_text);
 
             try segments.append(self.allocator, vaxis.Segment{
                 .text = number_text,
@@ -325,8 +291,8 @@ pub const PRListScreen = struct {
             });
 
             try segments.append(self.allocator, vaxis.Segment{
-                .text = meta_summary.lifecycle_badge,
-                .style = if (is_selected) theme.selected_row_style else getLifecycleStyle(pr),
+                .text = lifecycle_badge,
+                .style = if (is_selected) theme.selected_row_style else pr_presentation.lifecycleStyle(pr),
             });
 
             try segments.append(self.allocator, vaxis.Segment{
@@ -335,7 +301,7 @@ pub const PRListScreen = struct {
             });
 
             try segments.append(self.allocator, vaxis.Segment{
-                .text = meta_summary.review_text,
+                .text = review_text,
                 .style = muted_style,
             });
 
