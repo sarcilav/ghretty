@@ -2,7 +2,6 @@ const std = @import("std");
 const vaxis = @import("vaxis");
 const Screen = @import("screens/screen.zig").Screen;
 const PRListScreen = @import("screens/pr_list.zig").PRListScreen;
-const PRDetailsScreen = @import("screens/pr_details.zig").PRDetailsScreen;
 
 // This can contain internal events as well as Vaxis events.
 // Internal events can be posted into the same queue as vaxis events to allow
@@ -11,7 +10,6 @@ const Event = union(enum) {
     key_press: vaxis.Key,
     winsize: vaxis.Winsize,
     focus_in,
-    foo: u8,
 };
 
 pub const App = struct {
@@ -97,7 +95,7 @@ pub const App = struct {
                 },
                 .winsize => |ws| try self.vx.resize(self.allocator, self.tty.writer(), ws),
                 else => {
-                    std.debug.print("else", .{});
+                    // std.debug.print("else", .{});
                 },
             }
 
