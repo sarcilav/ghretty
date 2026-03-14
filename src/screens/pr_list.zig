@@ -147,15 +147,15 @@ pub const PRListScreen = struct {
             0,
             4,
             w,
-            h - 8,
+            h - 7,
         ));
 
         // --- Footer ---
         var footer = window.child(layout.rect(
             0,
-            h - 4,
+            h - 3,
             w,
-            4,
+            3,
         ));
 
         // =====================
