@@ -10,59 +10,65 @@ const Event = union(enum) {
     key_press: vaxis.Key,
     winsize: vaxis.Winsize,
     focus_in,
-    foo: u8,
 };
 
 pub const App = struct {
     allocator: std.mem.Allocator,
-    vx: vaxis.Vaxis,
-    tty_buf: [16 * 1024]u8,
-    tty: vaxis.Tty,
+    vx: *vaxis.Vaxis,
+    tty_buf: []u8,
+    tty: *vaxis.Tty,
     current_screen: *Screen,
     screen_stack: std.ArrayListUnmanaged(*Screen),
     should_quit: bool = false,
+    show_help: bool = false,
     loop: vaxis.Loop(Event),
 
     pub fn init(allocator: std.mem.Allocator) !@This() {
-        var vx = try vaxis.init(allocator, .{});
-        var buf: [16 * 1024]u8 = undefined;
-        var tty = try vaxis.Tty.init(&buf);
+        const buf = try allocator.alloc(u8, 16 * 1024);
+
+        const tty = try allocator.create(vaxis.Tty);
+        tty.* = try vaxis.Tty.init(buf);
         errdefer tty.deinit();
+
+        const vx = try allocator.create(vaxis.Vaxis);
+        vx.* = try vaxis.init(allocator, .{});
         errdefer vx.deinit(allocator, tty.writer());
 
-        var screen_stack = std.ArrayListUnmanaged(*Screen){};
-        
-        // Create initial screen
-        const pr_list_screen = try PRListScreen.create(allocator);
-                
-        try screen_stack.append(allocator, pr_list_screen);
-
-        var loop: vaxis.Loop(Event) = .{
-            .tty = &tty,
-            .vaxis = &vx,
-        };
-        try loop.init();
-
-        return @This(){
+        var app = App{
             .allocator = allocator,
             .vx = vx,
             .tty_buf = buf,
             .tty = tty,
-            .current_screen = pr_list_screen,
-            .screen_stack = screen_stack,
-            .loop = loop,
+            .current_screen = undefined,
+            .screen_stack = .{},
+            .loop = undefined,
         };
+
+        // Screens
+        const pr_list_screen = try PRListScreen.create(allocator);
+        try app.screen_stack.append(allocator, pr_list_screen);
+        app.current_screen = pr_list_screen;
+
+        // NOW initialize loop using pointers to app fields
+        app.loop = .{
+            .tty = app.tty,
+            .vaxis = app.vx,
+        };
+        try app.loop.init();
+
+        return app;
     }
 
     pub fn deinit(self: *@This()) void {
-        // 1️⃣ Deinit all screens
         for (self.screen_stack.items) |screen| {
             screen.deinit();
         }
         self.screen_stack.deinit(self.allocator);
         self.vx.deinit(self.allocator, self.tty.writer());
+        self.allocator.destroy(self.vx);
         self.tty.deinit();
-        //self.current_screen.deinit(); it is deinit as part of the stack
+        self.allocator.destroy(self.tty);
+        self.allocator.free(self.tty_buf);
     }
 
     pub fn run(self: *@This()) !void {
@@ -76,15 +82,35 @@ pub const App = struct {
             const event = self.loop.nextEvent();
             switch (event) {
                 .key_press => |key| {
-                    if (key.matches('q', .{ .ctrl = true })) {
+                    var handled = false;
+
+                    if (self.show_help) {
+                        if (key.matches('?', .{}) or key.matches(vaxis.Key.escape, .{}) or key.matches('q', .{})) {
+                            self.show_help = false;
+                        }
+                        handled = true;
+                    } else if (key.matches('?', .{})) {
+                        self.show_help = true;
+                        handled = true;
+                    } else if (key.matches('q', .{ .ctrl = true })) {
                         self.should_quit = true;
-                        continue;
+                        handled = true;
+                    } else if (key.matches(vaxis.Key.enter, .{})) {
+                        const new_screen = try self.current_screen.navigateInto();
+                        try self.navigateTo(new_screen);
+                        handled = true;
+                    } else if (key.matches('q', .{})) {
+                        self.navigateBack();
+                        handled = true;
                     }
-                    try self.current_screen.handleInput(key);
+
+                    if (!handled) {
+                        try self.current_screen.handleInput(key);
+                    }
                 },
                 .winsize => |ws| try self.vx.resize(self.allocator, self.tty.writer(), ws),
                 else => {
-                    std.debug.print("else", .{});
+                    // std.debug.print("else", .{});
                 },
             }
 
@@ -96,19 +122,29 @@ pub const App = struct {
 
             // Render
             try self.current_screen.render(win);
+            if (self.show_help) {
+                try self.current_screen.renderHelp(win);
+            }
             try self.vx.render(self.tty.writer());
         }
     }
 
     pub fn navigateTo(self: *@This(), screen: *Screen) !void {
-        try self.screen_stack.append(self.allocator, screen);
-        self.current_screen = screen;
+        if (screen != self.current_screen) {
+            try self.screen_stack.append(self.allocator, screen);
+            self.current_screen = screen;
+            self.show_help = false;
+        }
     }
 
     pub fn navigateBack(self: *@This()) void {
         if (self.screen_stack.items.len > 1) {
-            _ = self.screen_stack.pop();
+            if (self.screen_stack.pop()) |removed_screen| {
+                removed_screen.deinit();
+            }
+
             self.current_screen = self.screen_stack.items[self.screen_stack.items.len - 1];
+            self.show_help = false;
         }
     }
 };

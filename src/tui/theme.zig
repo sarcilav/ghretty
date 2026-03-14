@@ -5,28 +5,77 @@ const vaxis = @import("vaxis");
 // 8-15: bright versions
 
 pub const selected_row_style = vaxis.Style{
-    .fg = .{ .index = 0 },   // Black
-    .bg = .{ .index = 15 },  // Bright white
+    .fg = .{ .index = 0 }, // Black
+    .bg = .{ .index = 15 }, // Bright white
     .bold = true,
 };
 
 pub const normal_style = vaxis.Style{
-    .fg = .{ .index = 7 },   // White
-    .bg = .{ .index = 0 },   // Black
+    .fg = .{ .index = 7 }, // White
+    //.bg = .{ .index = 0 }, // Black
 };
 
 pub const header_style = vaxis.Style{
-    .fg = .{ .index = 6 },   // Cyan
+    .fg = .{ .index = 6 }, // Cyan
     .bold = true,
-    .underline = true,
+    .ul_style = .single,
 };
 
 pub const error_style = vaxis.Style{
-    .fg = .{ .index = 1 },   // Red
+    .fg = .{ .index = 1 }, // Red
     .bold = true,
 };
 
 pub const loading_style = vaxis.Style{
-    .fg = .{ .index = 3 },   // Yellow
+    .fg = .{ .index = 3 }, // Yellow
+    .bold = true,
+};
+
+pub const diff_line_styles = struct {
+    add: vaxis.Style = .{ .bg = .{ .index = 2 } },
+    remove: vaxis.Style = .{ .bg = .{ .index = 1 } },
+    hunk: vaxis.Style = .{ .fg = .{ .index = 3 }, .bold = true },
+    file: vaxis.Style = .{ .bold = true },
+    meta: vaxis.Style = .{ .fg = .{ .index = 6 } },
+    normal: vaxis.Style = .{},
+};
+
+pub const file_operation_styles = struct {
+    added: vaxis.Style = .{ .fg = .{ .index = 2 }, .bold = true }, // Green
+    deleted: vaxis.Style = .{ .fg = .{ .index = 1 }, .bold = true }, // Red
+    renamed: vaxis.Style = .{ .fg = .{ .index = 6 }, .bold = true }, // Cyan
+    modified: vaxis.Style = .{ .fg = .{ .index = 3 }, .bold = true }, // Yellow
+};
+
+pub const pr_number_style = vaxis.Style{
+    .fg = .{ .index = 6 }, // Cyan
+    .bold = true,
+};
+
+pub const pr_title_style = vaxis.Style{
+    .fg = .{ .index = 7 }, // White
+    .bold = true,
+};
+
+pub const pr_author_style = vaxis.Style{
+    .fg = .{ .index = 3 }, // Yellow
+};
+
+pub const muted_style = vaxis.Style{
+    .fg = .{ .index = 8 }, // Bright black / gray
+};
+
+pub const success_style = vaxis.Style{
+    .fg = .{ .index = 2 }, // Green
+    .bold = true,
+};
+
+pub const warning_style = vaxis.Style{
+    .fg = .{ .index = 3 }, // Yellow
+    .bold = true,
+};
+
+pub const danger_style = vaxis.Style{
+    .fg = .{ .index = 1 }, // Red
     .bold = true,
 };

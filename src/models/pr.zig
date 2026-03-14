@@ -6,6 +6,12 @@ pub const PRState = enum {
     merged,
 };
 
+pub const PRReviewAction = enum {
+    approve,
+    request_changes,
+    comment,
+};
+
 pub const PR = struct {
     number: u32,
     title: []const u8,
@@ -19,11 +25,11 @@ pub const PR = struct {
     pub fn deinit(self: *PR, allocator: std.mem.Allocator) void {
         allocator.free(self.title);
         allocator.free(self.author);
-        
+
         if (self.body) |body| {
             allocator.free(body);
         }
-        
+
         if (self.files) |*files| {
             for (files.items) |*file| {
                 file.deinit(allocator);
@@ -47,7 +53,7 @@ pub const FileChange = struct {
 // Test module
 test "PR model" {
     const allocator = std.testing.allocator;
-    
+
     var pr = PR{
         .number = 123,
         .title = try allocator.dupe(u8, "Test PR"),
@@ -57,7 +63,7 @@ test "PR model" {
         .review_requested = true,
     };
     defer pr.deinit(allocator);
-    
+
     try std.testing.expect(pr.number == 123);
     try std.testing.expectEqualStrings("Test PR", pr.title);
     try std.testing.expect(pr.state == .open);
