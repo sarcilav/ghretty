@@ -12,6 +12,13 @@ pub const PRReviewAction = enum {
     comment,
 };
 
+pub const PRMergeAction = enum {
+    merge_commit,
+    squash,
+    rebase,
+    close,
+};
+
 pub const PR = struct {
     number: u32,
     title: []const u8,

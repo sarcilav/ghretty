@@ -13,10 +13,18 @@ const FileDiffSection = @import("../tui/file_diff_section.zig").FileDiffSection;
 const PRDescriptionSection = @import("../tui/pr_description_section.zig").PRDescriptionSection;
 const help_modal = @import("../tui/help_modal.zig");
 const review_modal = @import("../tui/review_modal.zig");
+const merge_modal = @import("../tui/merge_modal.zig");
 const PRReviewAction = @import("../models/pr.zig").PRReviewAction;
+const PRMergeAction = @import("../models/pr.zig").PRMergeAction;
 const TextInput = vaxis.widgets.TextInput;
 
 pub const PRDetailsScreen = struct {
+    const ActiveModal = enum {
+        none,
+        review,
+        merge,
+    };
+
     base: Screen,
     allocator: std.mem.Allocator,
     github_client: *GitHubClient,
@@ -35,10 +43,11 @@ pub const PRDetailsScreen = struct {
     pr_additions_text: ?[]const u8 = null,
     pr_deletions_text: ?[]const u8 = null,
     current_section_type: enum { description, diff } = .description,
-    show_review_modal: bool = false,
+    active_modal: ActiveModal = .none,
     review_action: PRReviewAction = .approve,
-    review_input: TextInput,
-    review_modal_error: ?[]const u8 = null,
+    merge_action: PRMergeAction = .merge_commit,
+    modal_input: TextInput,
+    modal_error: ?[]const u8 = null,
     flash_message: ?[]const u8 = null,
     flash_message_is_error: bool = false,
 
@@ -57,7 +66,7 @@ pub const PRDetailsScreen = struct {
             .pr_number = pr_number,
             .file_diffs = file_diffs,
             .current_section_type = .description,
-            .review_input = TextInput.init(allocator),
+            .modal_input = TextInput.init(allocator),
         };
         return &self.base;
     }
@@ -85,8 +94,8 @@ pub const PRDetailsScreen = struct {
         if (self.pr_additions_text) |text| self.allocator.free(text);
         if (self.pr_deletions_text) |text| self.allocator.free(text);
         if (self.flash_message) |message| self.allocator.free(message);
-        if (self.review_modal_error) |message| self.allocator.free(message);
-        self.review_input.deinit();
+        if (self.modal_error) |message| self.allocator.free(message);
+        self.modal_input.deinit();
         if (self.pr) |*pr| pr.deinit(self.allocator);
 
         self.allocator.destroy(self.github_client);
@@ -101,8 +110,8 @@ pub const PRDetailsScreen = struct {
     pub fn handleInput(screen: *Screen, key: vaxis.Key) !void {
         const self = fromBase(screen);
 
-        if (self.show_review_modal) {
-            try self.handleReviewModalInput(key);
+        if (self.active_modal != .none) {
+            try self.handleModalInput(key);
             return;
         }
 
@@ -110,6 +119,10 @@ pub const PRDetailsScreen = struct {
         switch (key.codepoint) {
             'v' => {
                 self.openReviewModal();
+                return;
+            },
+            'm' => {
+                try self.openMergeModal();
                 return;
             },
             'd' => {
@@ -425,8 +438,10 @@ pub const PRDetailsScreen = struct {
             }
         }
 
-        if (self.show_review_modal) {
-            try review_modal.render(window, &self.review_input, self.review_action, self.review_modal_error);
+        switch (self.active_modal) {
+            .review => try review_modal.render(window, &self.modal_input, self.review_action, self.modal_error),
+            .merge => try merge_modal.render(window, &self.modal_input, self.merge_action, self.modal_error),
+            .none => {},
         }
     }
 
@@ -441,6 +456,7 @@ pub const PRDetailsScreen = struct {
             .{ .key = "d", .description = "Switch to the description view" },
             .{ .key = "f", .description = "Switch to the files view" },
             .{ .key = "v", .description = "Open the PR review modal" },
+            .{ .key = "m", .description = "Open the PR merge/close modal" },
             .{ .key = "r", .description = "Refresh pull request details" },
         });
 
@@ -469,43 +485,72 @@ pub const PRDetailsScreen = struct {
     }
 
     fn openReviewModal(self: *@This()) void {
-        self.show_review_modal = true;
+        self.active_modal = .review;
         self.review_action = .approve;
-        self.clearReviewModalError();
-        self.review_input.clearRetainingCapacity();
+        self.clearModalError();
+        self.modal_input.clearRetainingCapacity();
     }
 
-    fn closeReviewModal(self: *@This()) void {
-        self.show_review_modal = false;
-        self.clearReviewModalError();
-        self.review_input.clearRetainingCapacity();
+    fn openMergeModal(self: *@This()) !void {
+        const pr = self.pr orelse {
+            try self.setFlashMessage("Pull request details are still loading.", true);
+            return;
+        };
+
+        if (pr.state != .open) {
+            try self.setFlashMessage("Only open pull requests can be merged or closed.", true);
+            return;
+        }
+
+        self.active_modal = .merge;
+        self.merge_action = .merge_commit;
+        self.clearModalError();
+        self.modal_input.clearRetainingCapacity();
     }
 
-    fn handleReviewModalInput(self: *@This(), key: vaxis.Key) !void {
+    fn closeModal(self: *@This()) void {
+        self.active_modal = .none;
+        self.clearModalError();
+        self.modal_input.clearRetainingCapacity();
+    }
+
+    fn handleModalInput(self: *@This(), key: vaxis.Key) !void {
         if (key.matches(vaxis.Key.escape, .{}) or key.matches('q', .{})) {
-            self.closeReviewModal();
+            self.closeModal();
             return;
         }
 
         if (key.matches(vaxis.Key.tab, .{})) {
-            self.review_action = nextReviewAction(self.review_action);
-            self.clearReviewModalError();
+            switch (self.active_modal) {
+                .review => self.review_action = nextReviewAction(self.review_action),
+                .merge => self.merge_action = nextMergeAction(self.merge_action),
+                .none => {},
+            }
+            self.clearModalError();
             return;
         }
 
         if (key.matches(vaxis.Key.tab, .{ .shift = true })) {
-            self.review_action = previousReviewAction(self.review_action);
-            self.clearReviewModalError();
+            switch (self.active_modal) {
+                .review => self.review_action = previousReviewAction(self.review_action),
+                .merge => self.merge_action = previousMergeAction(self.merge_action),
+                .none => {},
+            }
+            self.clearModalError();
             return;
         }
 
         if (key.matches(vaxis.Key.enter, .{ .shift = true })) {
-            try self.submitReviewAction();
+            switch (self.active_modal) {
+                .review => try self.submitReviewAction(),
+                .merge => try self.submitMergeAction(),
+                .none => {},
+            }
             return;
         }
 
-        try self.review_input.update(.{ .key_press = key });
-        self.clearReviewModalError();
+        try self.modal_input.update(.{ .key_press = key });
+        self.clearModalError();
     }
 
     fn submitReviewAction(self: *@This()) !void {
@@ -513,7 +558,7 @@ pub const PRDetailsScreen = struct {
         defer if (body) |text| self.allocator.free(text);
 
         if (self.review_action == .comment and (body == null or body.?.len == 0)) {
-            try self.setReviewModalError("A comment is required for comment reviews.");
+            try self.setModalError("A comment is required for comment reviews.");
             return;
         }
 
@@ -523,18 +568,40 @@ pub const PRDetailsScreen = struct {
                 error.GhCommandFailed => "GitHub CLI command failed while submitting the PR action.",
                 else => "Unable to submit the PR action.",
             };
-            try self.setReviewModalError(message);
+            try self.setModalError(message);
             return;
         };
 
-        self.closeReviewModal();
+        self.closeModal();
         try self.setFlashMessage(successMessage(self.review_action), false);
         self.loading = true;
     }
 
+    fn submitMergeAction(self: *@This()) !void {
+        const message = try self.allocTextInputText(&self.modal_input);
+        defer if (message) |text| self.allocator.free(text);
+
+        self.github_client.submitPRMergeAction(self.pr_number, self.merge_action, message) catch |err| {
+            const merge_message = switch (err) {
+                error.GhCommandFailed => "GitHub CLI command failed while applying the PR action.",
+                else => "Unable to apply the PR action.",
+            };
+            try self.setModalError(merge_message);
+            return;
+        };
+
+        self.closeModal();
+        try self.setFlashMessage(mergeSuccessMessage(self.merge_action), false);
+        self.loading = true;
+    }
+
     fn allocReviewInputText(self: *@This()) !?[]const u8 {
-        const first_half = self.review_input.buf.firstHalf();
-        const second_half = self.review_input.buf.secondHalf();
+        return self.allocTextInputText(&self.modal_input);
+    }
+
+    fn allocTextInputText(self: *@This(), input: *TextInput) !?[]const u8 {
+        const first_half = input.buf.firstHalf();
+        const second_half = input.buf.secondHalf();
         const len = first_half.len + second_half.len;
         if (len == 0) return null;
 
@@ -550,15 +617,15 @@ pub const PRDetailsScreen = struct {
         self.flash_message_is_error = is_error;
     }
 
-    fn setReviewModalError(self: *@This(), message: []const u8) !void {
-        if (self.review_modal_error) |current| self.allocator.free(current);
-        self.review_modal_error = try self.allocator.dupe(u8, message);
+    fn setModalError(self: *@This(), message: []const u8) !void {
+        if (self.modal_error) |current| self.allocator.free(current);
+        self.modal_error = try self.allocator.dupe(u8, message);
     }
 
-    fn clearReviewModalError(self: *@This()) void {
-        if (self.review_modal_error) |current| {
+    fn clearModalError(self: *@This()) void {
+        if (self.modal_error) |current| {
             self.allocator.free(current);
-            self.review_modal_error = null;
+            self.modal_error = null;
         }
     }
 
@@ -578,11 +645,38 @@ pub const PRDetailsScreen = struct {
         };
     }
 
+    fn nextMergeAction(action: PRMergeAction) PRMergeAction {
+        return switch (action) {
+            .merge_commit => .squash,
+            .squash => .rebase,
+            .rebase => .close,
+            .close => .merge_commit,
+        };
+    }
+
+    fn previousMergeAction(action: PRMergeAction) PRMergeAction {
+        return switch (action) {
+            .merge_commit => .close,
+            .squash => .merge_commit,
+            .rebase => .squash,
+            .close => .rebase,
+        };
+    }
+
     fn successMessage(action: PRReviewAction) []const u8 {
         return switch (action) {
             .approve => "Approval submitted.",
             .request_changes => "Change request submitted.",
             .comment => "Comment submitted.",
+        };
+    }
+
+    fn mergeSuccessMessage(action: PRMergeAction) []const u8 {
+        return switch (action) {
+            .merge_commit => "Pull request merged with a merge commit.",
+            .squash => "Pull request squashed and merged.",
+            .rebase => "Pull request rebased and merged.",
+            .close => "Pull request closed.",
         };
     }
 
