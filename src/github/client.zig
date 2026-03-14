@@ -2,6 +2,7 @@ const std = @import("std");
 const PR = @import("../models/pr.zig").PR;
 const PRState = @import("../models/pr.zig").PRState;
 const FileChange = @import("../models/pr.zig").FileChange;
+const PRReviewAction = @import("../models/pr.zig").PRReviewAction;
 const git = @import("../models/git.zig");
 
 pub const GitHubClient = struct {
@@ -38,6 +39,42 @@ pub const GitHubClient = struct {
         defer self.allocator.free(raw_diff);
 
         return try self.parsePRDiff(raw_diff);
+    }
+
+    pub fn submitPRReview(
+        self: *@This(),
+        pr_number: u32,
+        action: PRReviewAction,
+        body: ?[]const u8,
+    ) !void {
+        const pr_str = try std.fmt.allocPrint(self.allocator, "{}", .{pr_number});
+        defer self.allocator.free(pr_str);
+
+        switch (action) {
+            .approve => {
+                if (body) |review_body| {
+                    const result = try self.runGhCommand(&.{ "pr", "review", pr_str, "--approve", "--body", review_body });
+                    defer self.allocator.free(result);
+                } else {
+                    const result = try self.runGhCommand(&.{ "pr", "review", pr_str, "--approve" });
+                    defer self.allocator.free(result);
+                }
+            },
+            .request_changes => {
+                if (body) |review_body| {
+                    const result = try self.runGhCommand(&.{ "pr", "review", pr_str, "--request-changes", "--body", review_body });
+                    defer self.allocator.free(result);
+                } else {
+                    const result = try self.runGhCommand(&.{ "pr", "review", pr_str, "--request-changes" });
+                    defer self.allocator.free(result);
+                }
+            },
+            .comment => {
+                const review_body = body orelse return error.MissingReviewBody;
+                const result = try self.runGhCommand(&.{ "pr", "review", pr_str, "--comment", "--body", review_body });
+                defer self.allocator.free(result);
+            },
+        }
     }
 
     fn runGhCommand(self: *@This(), args: []const []const u8) ![]const u8 {
@@ -105,12 +142,13 @@ pub const GitHubClient = struct {
 
         var current_file: ?git.FileDiff = null;
         var current_hunk: ?git.Hunk = null;
+        var current_file_lines = std.ArrayList([]const u8){};
+        defer current_file_lines.deinit(self.allocator);
 
         var lines = std.mem.splitScalar(u8, raw_diff_str, '\n');
 
         while (lines.next()) |raw_line| {
             const line = std.mem.trimRight(u8, raw_line, "\r");
-            //if (line.len == 0) continue; // Skip empty lines
 
             // Check for file header
             if (std.mem.startsWith(u8, line, "diff --git")) {
@@ -121,8 +159,12 @@ pub const GitHubClient = struct {
                         try file.hunks.append(self.allocator, hunk.*);
                         current_hunk = null;
                     }
+
+                    // Determine file operation from collected lines
+                    file.operation = git.parseFileOperation(current_file_lines.items);
                     try file_diffs.append(self.allocator, file.*);
                     current_file = null;
+                    current_file_lines.clearRetainingCapacity();
                 }
 
                 // Extract filename from "diff --git a/path/to/file b/path/to/file"
@@ -136,7 +178,15 @@ pub const GitHubClient = struct {
                         .hunks = std.ArrayList(git.Hunk){},
                     };
                 }
+
+                // Add this line to current file lines for operation detection
+                try current_file_lines.append(self.allocator, line);
                 continue;
+            }
+
+            // Add line to current file lines for operation detection
+            if (current_file != null) {
+                try current_file_lines.append(self.allocator, line);
             }
 
             // Check for hunk header
@@ -176,6 +226,8 @@ pub const GitHubClient = struct {
             }
         }
         if (current_file) |*file| {
+            // Determine operation for the last file
+            file.operation = git.parseFileOperation(current_file_lines.items);
             try file_diffs.append(self.allocator, file.*);
         }
 
