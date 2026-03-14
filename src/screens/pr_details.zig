@@ -269,10 +269,7 @@ pub const PRDetailsScreen = struct {
         var tabs_area = window.child(layout.rect(0, 5, w, 3));
 
         // --- Content ---
-        var content = window.child(layout.rect(0, 8, w, h - 11));
-
-        // --- Footer ---
-        var footer = window.child(layout.rect(0, h - 3, w, 3));
+        var content = window.child(layout.rect(0, 8, w, h - 8));
 
         // Render header in one print call so later lines do not overwrite the title.
         var header_segments = std.ArrayList(vaxis.Segment){};
@@ -392,11 +389,8 @@ pub const PRDetailsScreen = struct {
                 },
             }
         }
+    }
 
-        // Footer
-        _ = footer.print(&.{
-            .{ .text = "d: Description • f: Files • r: refresh • q: back • ctrl-q: quit" },
-        }, .{});
     }
 
     fn fromBase(screen: *Screen) *@This() {

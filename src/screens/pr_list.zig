@@ -147,15 +147,7 @@ pub const PRListScreen = struct {
             0,
             4,
             w,
-            h - 7,
-        ));
-
-        // --- Footer ---
-        var footer = window.child(layout.rect(
-            0,
-            h - 3,
-            w,
-            3,
+            h - 4,
         ));
 
         // =====================
@@ -313,13 +305,8 @@ pub const PRListScreen = struct {
             }
         }
         _ = body.print(segments.items, .{});
+    }
 
-        // =====================
-        // Footer
-        // =====================
-        _ = footer.print(&.{
-            .{ .text = "j/k: navigate • Enter: open • r: refresh • q: back" },
-        }, .{});
     }
 
     fn fromBase(screen: *Screen) *@This() {
