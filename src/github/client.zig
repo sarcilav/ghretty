@@ -2,6 +2,7 @@ const std = @import("std");
 const PR = @import("../models/pr.zig").PR;
 const PRState = @import("../models/pr.zig").PRState;
 const FileChange = @import("../models/pr.zig").FileChange;
+const PRReviewAction = @import("../models/pr.zig").PRReviewAction;
 const git = @import("../models/git.zig");
 
 pub const GitHubClient = struct {
@@ -21,15 +22,59 @@ pub const GitHubClient = struct {
     }
 
     pub fn fetchPRDetails(self: *@This(), pr_number: u32) !PR {
-        const result = try self.runGhCommand(&.{ "pr", "view", try std.fmt.allocPrint(self.allocator, "{}", .{pr_number}), "--json", "title,author,state,isDraft,body,files,number" });
+        const pr_str = try std.fmt.allocPrint(self.allocator, "{}", .{pr_number});
+        defer self.allocator.free(pr_str);
+
+        const result = try self.runGhCommand(&.{ "pr", "view", pr_str, "--json", "title,author,state,isDraft,body,files,number" });
         defer self.allocator.free(result);
 
         return try self.parsePRDetails(result);
     }
 
-    pub fn fetchPRDiff(self: *@This(), pr: PR) !std.ArrayList(git.DiffLine) {
-        const raw_diff = try self.runGhCommand(&.{ "pr", "diff", try std.fmt.allocPrint(self.allocator, "{}", .{pr.number}), "--patch" });
+    pub fn fetchPRDiff(self: *@This(), pr: PR) !std.ArrayList(git.FileDiff) {
+        const pr_str = try std.fmt.allocPrint(self.allocator, "{}", .{pr.number});
+        defer self.allocator.free(pr_str);
+
+        const raw_diff = try self.runGhCommand(&.{ "pr", "diff", pr_str }); //, "--patch" });
+        defer self.allocator.free(raw_diff);
+
         return try self.parsePRDiff(raw_diff);
+    }
+
+    pub fn submitPRReview(
+        self: *@This(),
+        pr_number: u32,
+        action: PRReviewAction,
+        body: ?[]const u8,
+    ) !void {
+        const pr_str = try std.fmt.allocPrint(self.allocator, "{}", .{pr_number});
+        defer self.allocator.free(pr_str);
+
+        switch (action) {
+            .approve => {
+                if (body) |review_body| {
+                    const result = try self.runGhCommand(&.{ "pr", "review", pr_str, "--approve", "--body", review_body });
+                    defer self.allocator.free(result);
+                } else {
+                    const result = try self.runGhCommand(&.{ "pr", "review", pr_str, "--approve" });
+                    defer self.allocator.free(result);
+                }
+            },
+            .request_changes => {
+                if (body) |review_body| {
+                    const result = try self.runGhCommand(&.{ "pr", "review", pr_str, "--request-changes", "--body", review_body });
+                    defer self.allocator.free(result);
+                } else {
+                    const result = try self.runGhCommand(&.{ "pr", "review", pr_str, "--request-changes" });
+                    defer self.allocator.free(result);
+                }
+            },
+            .comment => {
+                const review_body = body orelse return error.MissingReviewBody;
+                const result = try self.runGhCommand(&.{ "pr", "review", pr_str, "--comment", "--body", review_body });
+                defer self.allocator.free(result);
+            },
+        }
     }
 
     fn runGhCommand(self: *@This(), args: []const []const u8) ![]const u8 {
@@ -68,6 +113,7 @@ pub const GitHubClient = struct {
             self.allocator,
             std.math.maxInt(usize),
         );
+        defer self.allocator.free(stderr);
 
         const term = try process.wait();
         switch (term) {
@@ -85,20 +131,155 @@ pub const GitHubClient = struct {
         return stdout;
     }
 
-    fn parsePRDiff(self: *@This(), raw_diff_str: []const u8) !std.ArrayList(git.DiffLine) {
-        var diff_lines = std.ArrayList(git.DiffLine){};
+    fn parsePRDiff(self: *@This(), raw_diff_str: []const u8) !std.ArrayList(git.FileDiff) {
+        var file_diffs = std.ArrayList(git.FileDiff){};
         errdefer {
-            diff_lines.deinit(self.allocator);
+            for (file_diffs.items) |*file_diff| {
+                file_diff.deinit(self.allocator);
+            }
+            file_diffs.deinit(self.allocator);
         }
-        var lines = std.mem.splitSequence(u8, raw_diff_str, "\n");
-        while (lines.next()) |line| {
-            const diff_line = git.DiffLine{
-                .text = line,
-                .kind = git.classify(line),
-            };
-            try diff_lines.append(self.allocator, diff_line);
+
+        var current_file: ?git.FileDiff = null;
+        var current_hunk: ?git.Hunk = null;
+        var current_file_lines = std.ArrayList([]const u8){};
+        defer current_file_lines.deinit(self.allocator);
+
+        var lines = std.mem.splitScalar(u8, raw_diff_str, '\n');
+
+        while (lines.next()) |raw_line| {
+            const line = std.mem.trimRight(u8, raw_line, "\r");
+
+            // Check for file header
+            if (std.mem.startsWith(u8, line, "diff --git")) {
+                // Save previous file if exists
+                if (current_file) |*file| {
+                    // Save previous hunk if exists
+                    if (current_hunk) |*hunk| {
+                        try file.hunks.append(self.allocator, hunk.*);
+                        current_hunk = null;
+                    }
+
+                    // Determine file operation from collected lines
+                    file.operation = git.parseFileOperation(current_file_lines.items);
+                    try file_diffs.append(self.allocator, file.*);
+                    current_file = null;
+                    current_file_lines.clearRetainingCapacity();
+                }
+
+                // Extract filename from "diff --git a/path/to/file b/path/to/file"
+                if (std.mem.indexOf(u8, line, " b/")) |b_pos| {
+                    const file_start = b_pos + 3; // Skip " b/"
+                    const file_end = line.len;
+                    const file_path = line[file_start..file_end];
+
+                    current_file = git.FileDiff{
+                        .file_path = try self.allocator.dupe(u8, file_path),
+                        .hunks = std.ArrayList(git.Hunk){},
+                    };
+                }
+
+                // Add this line to current file lines for operation detection
+                try current_file_lines.append(self.allocator, line);
+                continue;
+            }
+
+            // Add line to current file lines for operation detection
+            if (current_file != null) {
+                try current_file_lines.append(self.allocator, line);
+            }
+
+            // Check for hunk header
+            if (std.mem.startsWith(u8, line, "@@")) {
+                // Save previous hunk if exists
+                if (current_hunk) |*hunk| {
+                    if (current_file) |*file| {
+                        try file.hunks.append(self.allocator, hunk.*);
+                    }
+                    current_hunk = null;
+                }
+
+                // Start new hunk
+                const safe_header = try escapeForDisplay(self.allocator, line);
+                current_hunk = git.Hunk{
+                    .header = safe_header,
+                    .lines = std.ArrayList(git.DiffLine){},
+                };
+                continue;
+            }
+
+            // Handle regular diff lines
+            if (current_hunk) |*hunk| {
+                const kind = git.classify(line);
+                const safe_line = try escapeForDisplay(self.allocator, line);
+                try hunk.lines.append(self.allocator, git.DiffLine{
+                    .kind = kind,
+                    .text = safe_line,
+                });
+            }
         }
-        return diff_lines;
+
+        // Save the last file and hunk
+        if (current_hunk) |*hunk| {
+            if (current_file) |*file| {
+                try file.hunks.append(self.allocator, hunk.*);
+            }
+        }
+        if (current_file) |*file| {
+            // Determine operation for the last file
+            file.operation = git.parseFileOperation(current_file_lines.items);
+            try file_diffs.append(self.allocator, file.*);
+        }
+
+        return file_diffs;
+    }
+
+    fn escapeForDisplay(
+        allocator: std.mem.Allocator,
+        input: []const u8,
+    ) ![]u8 {
+        const hex = comptime "0123456789abcdef";
+
+        // ---------- PASS 1: compute final size ----------
+        var out_len: usize = 0;
+
+        for (input) |b| {
+            if (b == 0x1b or
+                (b < 0x20 and b != '\n' and b != '\t') or
+                b == 0x7f)
+            {
+                out_len += 4; // "\xHH"
+            } else {
+                out_len += 1;
+            }
+        }
+
+        // ---------- Allocate exactly once ----------
+        var out = try allocator.alloc(u8, out_len);
+
+        // ---------- PASS 2: fill ----------
+        var j: usize = 0;
+
+        for (input) |b| {
+            if (b == 0x1b or
+                (b < 0x20 and b != '\n' and b != '\t') or
+                b == 0x7f)
+            {
+                out[j] = '\\';
+                j += 1;
+                out[j] = 'x';
+                j += 1;
+                out[j] = hex[b >> 4];
+                j += 1;
+                out[j] = hex[b & 0xF];
+                j += 1;
+            } else {
+                out[j] = b;
+                j += 1;
+            }
+        }
+
+        return out;
     }
 
     fn parsePRList(self: *@This(), json_str: []const u8) !std.ArrayList(PR) {
