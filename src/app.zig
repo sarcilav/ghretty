@@ -2,7 +2,6 @@ const std = @import("std");
 const vaxis = @import("vaxis");
 const Screen = @import("screens/screen.zig").Screen;
 const PRListScreen = @import("screens/pr_list.zig").PRListScreen;
-const PRDetailsScreen = @import("screens/pr_details.zig").PRDetailsScreen;
 
 // This can contain internal events as well as Vaxis events.
 // Internal events can be posted into the same queue as vaxis events to allow
@@ -11,7 +10,6 @@ const Event = union(enum) {
     key_press: vaxis.Key,
     winsize: vaxis.Winsize,
     focus_in,
-    foo: u8,
 };
 
 pub const App = struct {
@@ -22,6 +20,7 @@ pub const App = struct {
     current_screen: *Screen,
     screen_stack: std.ArrayListUnmanaged(*Screen),
     should_quit: bool = false,
+    show_help: bool = false,
     loop: vaxis.Loop(Event),
 
     pub fn init(allocator: std.mem.Allocator) !@This() {
@@ -83,21 +82,35 @@ pub const App = struct {
             const event = self.loop.nextEvent();
             switch (event) {
                 .key_press => |key| {
-                    if (key.matches('q', .{ .ctrl = true })) {
+                    var handled = false;
+
+                    if (self.show_help) {
+                        if (key.matches('?', .{}) or key.matches(vaxis.Key.escape, .{}) or key.matches('q', .{})) {
+                            self.show_help = false;
+                        }
+                        handled = true;
+                    } else if (key.matches('?', .{})) {
+                        self.show_help = true;
+                        handled = true;
+                    } else if (key.matches('q', .{ .ctrl = true })) {
                         self.should_quit = true;
-                        continue;
+                        handled = true;
                     } else if (key.matches(vaxis.Key.enter, .{})) {
                         const new_screen = try self.current_screen.navigateInto();
                         try self.navigateTo(new_screen);
+                        handled = true;
                     } else if (key.matches('q', .{})) {
                         self.navigateBack();
-                    } else {
+                        handled = true;
+                    }
+
+                    if (!handled) {
                         try self.current_screen.handleInput(key);
                     }
                 },
                 .winsize => |ws| try self.vx.resize(self.allocator, self.tty.writer(), ws),
                 else => {
-                    std.debug.print("else", .{});
+                    // std.debug.print("else", .{});
                 },
             }
 
@@ -109,6 +122,9 @@ pub const App = struct {
 
             // Render
             try self.current_screen.render(win);
+            if (self.show_help) {
+                try self.current_screen.renderHelp(win);
+            }
             try self.vx.render(self.tty.writer());
         }
     }
@@ -117,6 +133,7 @@ pub const App = struct {
         if (screen != self.current_screen) {
             try self.screen_stack.append(self.allocator, screen);
             self.current_screen = screen;
+            self.show_help = false;
         }
     }
 
@@ -127,6 +144,7 @@ pub const App = struct {
             }
 
             self.current_screen = self.screen_stack.items[self.screen_stack.items.len - 1];
+            self.show_help = false;
         }
     }
 };

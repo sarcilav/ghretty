@@ -1,6 +1,7 @@
 const std = @import("std");
 const vaxis = @import("vaxis");
 const Section = @import("section.zig").Section;
+const HelpContent = @import("section.zig").HelpContent;
 const theme = @import("theme.zig");
 
 pub const PRDescriptionSection = struct {
@@ -79,10 +80,22 @@ pub const PRDescriptionSection = struct {
         self.allocator.destroy(self);
     }
 
+    fn helpContent(data: *anyopaque) HelpContent {
+        _ = data;
+        return .{
+            .title = "Description Help",
+            .entries = &.{
+                .{ .key = "j", .description = "Scroll down" },
+                .{ .key = "k", .description = "Scroll up" },
+            },
+        };
+    }
+
     const vtable = Section.VTable{
         .handleInput = handleInput,
         .update = update,
         .render = render,
+        .helpContent = helpContent,
         .deinit = deinit,
     };
 };
