@@ -10,7 +10,7 @@ pub fn render(
     selected_action: PRReviewAction,
     error_message: ?[]const u8,
 ) !void {
-    const modal_width: u16 = @min(window.width -| 4, 72);
+    const modal_width: u16 = @min(window.width -| 4, 80);
     const modal_height: u16 = @min(window.height -| 2, 12);
     const x = if (window.width > modal_width) (window.width - modal_width) / 2 else 0;
     const y = if (window.height > modal_height) (window.height - modal_height) / 2 else 0;
@@ -51,7 +51,7 @@ pub fn render(
     var input_box = modal.child(.{
         .x_off = 2,
         .y_off = 4,
-        .width = modal_width -| 4,
+        .width = modal_width -| 5,
         .height = 5,
         .border = .{ .where = .all },
     });

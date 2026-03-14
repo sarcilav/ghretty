@@ -161,10 +161,10 @@ pub const GitHubClient = struct {
                     }
 
                     // Determine file operation from collected lines
-                    file.operation = git.parseFileOperation(current_file_lines.items); // NEW
+                    file.operation = git.parseFileOperation(current_file_lines.items);
                     try file_diffs.append(self.allocator, file.*);
                     current_file = null;
-                    current_file_lines.clearRetainingCapacity(); // NEW: clear for next file
+                    current_file_lines.clearRetainingCapacity();
                 }
 
                 // Extract filename from "diff --git a/path/to/file b/path/to/file"
@@ -227,7 +227,7 @@ pub const GitHubClient = struct {
         }
         if (current_file) |*file| {
             // Determine operation for the last file
-            file.operation = git.parseFileOperation(current_file_lines.items); // NEW
+            file.operation = git.parseFileOperation(current_file_lines.items);
             try file_diffs.append(self.allocator, file.*);
         }
 
