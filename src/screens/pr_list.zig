@@ -140,15 +140,15 @@ pub const PRListScreen = struct {
             0,
             0,
             w,
-            4,
+            3,
         ));
 
         // --- Body ---
         var body = window.child(layout.rect(
             0,
-            4,
+            3,
             w,
-            h - 4,
+            h - 3,
         ));
 
         // =====================
@@ -157,12 +157,6 @@ pub const PRListScreen = struct {
         _ = header.print(&.{
             .{
                 .text = "GitHub PR Visualizer",
-            },
-        }, .{});
-
-        _ = header.print(&.{
-            .{
-                .text = "\nPress r: refresh  ctrl-q: quit",
             },
         }, .{});
 
