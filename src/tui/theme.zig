@@ -18,7 +18,7 @@ pub const normal_style = vaxis.Style{
 pub const header_style = vaxis.Style{
     .fg = .{ .index = 6 }, // Cyan
     .bold = true,
-    .underline = true,
+    .ul_style = .single,
 };
 
 pub const error_style = vaxis.Style{
@@ -59,4 +59,23 @@ pub const pr_title_style = vaxis.Style{
 
 pub const pr_author_style = vaxis.Style{
     .fg = .{ .index = 3 }, // Yellow
+};
+
+pub const muted_style = vaxis.Style{
+    .fg = .{ .index = 8 }, // Bright black / gray
+};
+
+pub const success_style = vaxis.Style{
+    .fg = .{ .index = 2 }, // Green
+    .bold = true,
+};
+
+pub const warning_style = vaxis.Style{
+    .fg = .{ .index = 3 }, // Yellow
+    .bold = true,
+};
+
+pub const danger_style = vaxis.Style{
+    .fg = .{ .index = 1 }, // Red
+    .bold = true,
 };
