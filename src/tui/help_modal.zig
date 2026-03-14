@@ -59,6 +59,7 @@ fn padKey(key: []const u8) []const u8 {
             'j' => " j ",
             'k' => " k ",
             'v' => " v ",
+            'm' => " m ",
             'd' => " d ",
             'f' => " f ",
             'r' => " r ",
