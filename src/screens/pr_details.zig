@@ -8,8 +8,10 @@ const layout = @import("../tui/layout.zig");
 const pr_presentation = @import("../tui/pr_presentation.zig");
 const theme = @import("../tui/theme.zig");
 const Section = @import("../tui/section.zig").Section;
+const HelpEntry = @import("../tui/section.zig").HelpEntry;
 const FileDiffSection = @import("../tui/file_diff_section.zig").FileDiffSection;
 const PRDescriptionSection = @import("../tui/pr_description_section.zig").PRDescriptionSection;
+const help_modal = @import("../tui/help_modal.zig");
 
 pub const PRDetailsScreen = struct {
     base: Screen,
@@ -391,6 +393,37 @@ pub const PRDetailsScreen = struct {
         }
     }
 
+    fn renderHelp(screen: *Screen, window: vaxis.Window) !void {
+        const self = fromBase(screen);
+        var section_title: ?[]const u8 = null;
+
+        var entries = std.ArrayList(HelpEntry){};
+        defer entries.deinit(self.allocator);
+
+        try entries.appendSlice(self.allocator, &.{
+            .{ .key = "d", .description = "Switch to the description view" },
+            .{ .key = "f", .description = "Switch to the files view" },
+            .{ .key = "r", .description = "Refresh pull request details" },
+        });
+
+        if (self.current_section) |section| {
+            const section_help = section.helpContent();
+            section_title = section_help.title;
+            try entries.appendSlice(self.allocator, section_help.entries);
+        }
+
+        try entries.appendSlice(self.allocator, &.{
+            .{ .key = "q", .description = "Go back" },
+            .{ .key = "ctrl-q", .description = "Quit ghretty" },
+            .{ .key = "?", .description = "Close this help modal" },
+        });
+
+        const title = section_title orelse switch (self.current_section_type) {
+            .description => "Pull Request Details: Description",
+            .diff => "Pull Request Details: Files",
+        };
+
+        try help_modal.render(window, title, entries.items);
     }
 
     fn fromBase(screen: *Screen) *@This() {
@@ -402,6 +435,7 @@ pub const PRDetailsScreen = struct {
         .handleInput = handleInput,
         .update = update,
         .render = render,
+        .renderHelp = renderHelp,
         .deinit = deinit,
     };
 };

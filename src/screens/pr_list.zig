@@ -7,6 +7,7 @@ const GitHubClient = @import("../github/client.zig").GitHubClient;
 const layout = @import("../tui/layout.zig");
 const pr_presentation = @import("../tui/pr_presentation.zig");
 const theme = @import("../tui/theme.zig");
+const help_modal = @import("../tui/help_modal.zig");
 
 pub const PRListScreen = struct {
     base: Screen,
@@ -307,6 +308,17 @@ pub const PRListScreen = struct {
         _ = body.print(segments.items, .{});
     }
 
+    fn renderHelp(screen: *Screen, window: vaxis.Window) !void {
+        _ = screen;
+        try help_modal.render(window, "Pull Request List", &.{
+            .{ .key = "j", .description = "Move selection down" },
+            .{ .key = "k", .description = "Move selection up" },
+            .{ .key = "enter", .description = "Open the selected pull request" },
+            .{ .key = "r", .description = "Refresh the pull request list" },
+            .{ .key = "q", .description = "Go back or quit from the top-level list" },
+            .{ .key = "ctrl-q", .description = "Quit ghretty" },
+            .{ .key = "?", .description = "Close this help modal" },
+        });
     }
 
     fn fromBase(screen: *Screen) *@This() {
@@ -318,6 +330,7 @@ pub const PRListScreen = struct {
         .handleInput = handleInput,
         .update = update,
         .render = render,
+        .renderHelp = renderHelp,
         .deinit = deinit,
     };
 };
