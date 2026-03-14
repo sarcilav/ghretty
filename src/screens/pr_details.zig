@@ -5,6 +5,7 @@ const PR = @import("../models/pr.zig").PR;
 const git = @import("../models/git.zig");
 const GitHubClient = @import("../github/client.zig").GitHubClient;
 const layout = @import("../tui/layout.zig");
+const pr_presentation = @import("../tui/pr_presentation.zig");
 const theme = @import("../tui/theme.zig");
 const Section = @import("../tui/section.zig").Section;
 const FileDiffSection = @import("../tui/file_diff_section.zig").FileDiffSection;
@@ -22,6 +23,12 @@ pub const PRDetailsScreen = struct {
     file_diffs: std.ArrayList(git.FileDiff),
     pr_title: ?[]const u8 = null,
     pr_author: ?[]const u8 = null,
+    pr_status_badge: ?[]const u8 = null,
+    pr_lifecycle_badge: ?[]const u8 = null,
+    pr_review_text: ?[]const u8 = null,
+    pr_file_count_text: ?[]const u8 = null,
+    pr_additions_text: ?[]const u8 = null,
+    pr_deletions_text: ?[]const u8 = null,
     current_section_type: enum { description, diff } = .description,
 
     pub fn create(allocator: std.mem.Allocator, pr_number: u32) !*Screen {
@@ -59,6 +66,12 @@ pub const PRDetailsScreen = struct {
 
         if (self.pr_title) |title| self.allocator.free(title);
         if (self.pr_author) |author| self.allocator.free(author);
+        if (self.pr_status_badge) |badge| self.allocator.free(badge);
+        if (self.pr_lifecycle_badge) |badge| self.allocator.free(badge);
+        if (self.pr_review_text) |text| self.allocator.free(text);
+        if (self.pr_file_count_text) |text| self.allocator.free(text);
+        if (self.pr_additions_text) |text| self.allocator.free(text);
+        if (self.pr_deletions_text) |text| self.allocator.free(text);
         if (self.pr) |*pr| pr.deinit(self.allocator);
 
         self.allocator.destroy(self.github_client);
@@ -163,6 +176,30 @@ pub const PRDetailsScreen = struct {
             self.allocator.free(author);
             self.pr_author = null;
         }
+        if (self.pr_status_badge) |badge| {
+            self.allocator.free(badge);
+            self.pr_status_badge = null;
+        }
+        if (self.pr_lifecycle_badge) |badge| {
+            self.allocator.free(badge);
+            self.pr_lifecycle_badge = null;
+        }
+        if (self.pr_review_text) |text| {
+            self.allocator.free(text);
+            self.pr_review_text = null;
+        }
+        if (self.pr_file_count_text) |text| {
+            self.allocator.free(text);
+            self.pr_file_count_text = null;
+        }
+        if (self.pr_additions_text) |text| {
+            self.allocator.free(text);
+            self.pr_additions_text = null;
+        }
+        if (self.pr_deletions_text) |text| {
+            self.allocator.free(text);
+            self.pr_deletions_text = null;
+        }
         if (self.pr) |*pr| {
             pr.deinit(self.allocator);
             self.pr = null;
@@ -187,12 +224,21 @@ pub const PRDetailsScreen = struct {
             "PR #{}: {s}",
             .{ self.pr_number, self.pr.?.title },
         );
-
-        self.pr_author = try std.fmt.allocPrint(
-            self.allocator,
-            "\nAuthor: @{s}",
-            .{self.pr.?.author},
-        );
+        self.pr_author = try std.fmt.allocPrint(self.allocator, "@{s}", .{self.pr.?.author});
+        self.pr_status_badge = try pr_presentation.allocStatusBadge(self.allocator, self.pr.?);
+        self.pr_lifecycle_badge = try self.allocator.dupe(u8, pr_presentation.lifecycleText(self.pr.?));
+        self.pr_review_text = try self.allocator.dupe(u8, pr_presentation.reviewText(self.pr.?));
+        if (self.pr.?.files) |files| {
+            var additions: u32 = 0;
+            var deletions: u32 = 0;
+            for (files.items) |file| {
+                additions += file.additions;
+                deletions += file.deletions;
+            }
+            self.pr_file_count_text = try std.fmt.allocPrint(self.allocator, "{} files  •  ", .{files.items.len});
+            self.pr_additions_text = try std.fmt.allocPrint(self.allocator, "+{}", .{additions});
+            self.pr_deletions_text = try std.fmt.allocPrint(self.allocator, "-{}", .{deletions});
+        }
 
         // Create initial section based on current_section_type
         switch (self.current_section_type) {
@@ -217,23 +263,93 @@ pub const PRDetailsScreen = struct {
         const h = window.height;
 
         // --- Header ---
-        var header = window.child(layout.rect(0, 0, w, 4));
+        var header = window.child(layout.rect(0, 0, w, 5));
 
         // --- Tabs ---
-        var tabs_area = window.child(layout.rect(0, 4, w, 3));
+        var tabs_area = window.child(layout.rect(0, 5, w, 3));
 
         // --- Content ---
-        var content = window.child(layout.rect(0, 7, w, h - 11));
+        var content = window.child(layout.rect(0, 8, w, h - 11));
 
         // --- Footer ---
-        var footer = window.child(layout.rect(0, h - 4, w, 4));
+        var footer = window.child(layout.rect(0, h - 3, w, 3));
 
-        // Render header
+        // Render header in one print call so later lines do not overwrite the title.
+        var header_segments = std.ArrayList(vaxis.Segment){};
+        defer header_segments.deinit(self.allocator);
+
         if (self.pr_title) |title| {
-            _ = header.print(&.{.{ .text = title }}, .{});
+            try header_segments.append(self.allocator, .{
+                .text = title,
+                .style = theme.header_style,
+            });
         }
-        if (self.pr_author) |author| {
-            _ = header.print(&.{.{ .text = author }}, .{});
+        if (self.pr) |pr| {
+            if (header_segments.items.len > 0) {
+                try header_segments.append(self.allocator, .{
+                    .text = "\n",
+                    .style = theme.normal_style,
+                });
+            }
+            try header_segments.append(self.allocator, .{
+                .text = self.pr_author orelse "",
+                .style = theme.pr_author_style,
+            });
+            try header_segments.append(self.allocator, .{
+                .text = " ",
+                .style = theme.normal_style,
+            });
+            try header_segments.append(self.allocator, .{
+                .text = self.pr_status_badge orelse pr_presentation.statusText(pr),
+                .style = pr_presentation.statusStyle(pr),
+            });
+            try header_segments.append(self.allocator, .{
+                .text = " ",
+                .style = theme.normal_style,
+            });
+            try header_segments.append(self.allocator, .{
+                .text = self.pr_lifecycle_badge orelse pr_presentation.lifecycleText(pr),
+                .style = pr_presentation.lifecycleStyle(pr),
+            });
+            try header_segments.append(self.allocator, .{
+                .text = " ",
+                .style = theme.normal_style,
+            });
+            try header_segments.append(self.allocator, .{
+                .text = self.pr_review_text orelse pr_presentation.reviewText(pr),
+                .style = theme.muted_style,
+            });
+
+            if (self.pr_file_count_text) |count_text| {
+                try header_segments.append(self.allocator, .{
+                    .text = "\n",
+                    .style = theme.normal_style,
+                });
+                try header_segments.append(self.allocator, .{
+                    .text = count_text,
+                    .style = theme.muted_style,
+                });
+                if (self.pr_additions_text) |additions_text| {
+                    try header_segments.append(self.allocator, .{
+                        .text = additions_text,
+                        .style = theme.success_style,
+                    });
+                }
+                try header_segments.append(self.allocator, .{
+                    .text = "  ",
+                    .style = theme.normal_style,
+                });
+                if (self.pr_deletions_text) |deletions_text| {
+                    try header_segments.append(self.allocator, .{
+                        .text = deletions_text,
+                        .style = theme.danger_style,
+                    });
+                }
+            }
+        }
+
+        if (header_segments.items.len > 0) {
+            _ = header.print(header_segments.items, .{});
         }
 
         // Render tabs
