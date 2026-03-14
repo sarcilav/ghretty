@@ -5,7 +5,9 @@ const PRDetailsScreen = @import("pr_details.zig").PRDetailsScreen;
 const PR = @import("../models/pr.zig").PR;
 const GitHubClient = @import("../github/client.zig").GitHubClient;
 const layout = @import("../tui/layout.zig");
+const pr_presentation = @import("../tui/pr_presentation.zig");
 const theme = @import("../tui/theme.zig");
+const help_modal = @import("../tui/help_modal.zig");
 
 pub const PRListScreen = struct {
     base: Screen,
@@ -16,7 +18,7 @@ pub const PRListScreen = struct {
     offset: usize = 0,
     loading: bool = true,
     err_msg: ?[]const u8 = null,
-    visible_pr_numbers: std.ArrayListUnmanaged([]u8),
+    visible_pr_elements: std.ArrayListUnmanaged([]u8),
 
     pub fn create(allocator: std.mem.Allocator) !*Screen {
         const self = try allocator.create(@This());
@@ -26,14 +28,14 @@ pub const PRListScreen = struct {
         github_client.* = GitHubClient.init(allocator);
 
         const prs = std.ArrayList(PR){};
-        const visible_pr_numbers = std.ArrayListUnmanaged([]u8){};
+        const visible_pr_elements = std.ArrayListUnmanaged([]u8){};
 
         self.* = .{
             .base = .{ .vtable = &vtable },
             .allocator = allocator,
             .github_client = github_client,
             .prs = prs,
-            .visible_pr_numbers = visible_pr_numbers,
+            .visible_pr_elements = visible_pr_elements,
         };
 
         return &self.base;
@@ -42,10 +44,10 @@ pub const PRListScreen = struct {
     fn deinit(screen: *Screen) void {
         const self = fromBase(screen);
 
-        for (self.visible_pr_numbers.items) |numbers| {
+        for (self.visible_pr_elements.items) |numbers| {
             self.allocator.free(numbers);
         }
-        self.visible_pr_numbers.deinit(self.allocator);
+        self.visible_pr_elements.deinit(self.allocator);
 
         for (self.prs.items) |*pr| {
             pr.deinit(self.allocator);
@@ -138,23 +140,15 @@ pub const PRListScreen = struct {
             0,
             0,
             w,
-            4,
+            3,
         ));
 
         // --- Body ---
         var body = window.child(layout.rect(
             0,
-            4,
+            3,
             w,
-            h - 8,
-        ));
-
-        // --- Footer ---
-        var footer = window.child(layout.rect(
-            0,
-            h - 4,
-            w,
-            4,
+            h - 3,
         ));
 
         // =====================
@@ -163,12 +157,6 @@ pub const PRListScreen = struct {
         _ = header.print(&.{
             .{
                 .text = "GitHub PR Visualizer",
-            },
-        }, .{});
-
-        _ = header.print(&.{
-            .{
-                .text = "\nPress r: refresh  ctrl-q: quit",
             },
         }, .{});
 
@@ -203,16 +191,23 @@ pub const PRListScreen = struct {
             return;
         }
 
-        const visible = @min(
-            self.prs.items.len -| self.offset,
-            body.height,
-        );
+        // logic for multi lines list items
+        const block_height: usize = 1;
+        const visible_slots = @max(@as(usize, 1), body.height / block_height);
+
+        if (self.selected_index < self.offset) {
+            self.offset = self.selected_index;
+        } else if (self.selected_index >= self.offset + visible_slots) {
+            self.offset = self.selected_index - visible_slots + 1;
+        }
+
+        const visible = @min(self.prs.items.len -| self.offset, visible_slots);
 
         // Clear prev pr visible numbers
-        for (self.visible_pr_numbers.items) |numbr| {
+        for (self.visible_pr_elements.items) |numbr| {
             self.allocator.free(numbr);
         }
-        self.visible_pr_numbers.clearRetainingCapacity();
+        self.visible_pr_elements.clearRetainingCapacity();
 
         // Build segments array
         var segments = std.ArrayList(vaxis.Segment){};
@@ -224,36 +219,79 @@ pub const PRListScreen = struct {
             const is_selected = idx == self.selected_index;
 
             const base_style = if (is_selected) theme.selected_row_style else theme.normal_style;
+            const muted_style = if (is_selected) theme.selected_row_style else theme.muted_style;
+            const status_style = if (is_selected) theme.selected_row_style else pr_presentation.statusStyle(pr);
 
-            // Format PR number into our shared buffer
-            const number_text = try std.fmt.allocPrint(self.allocator, "#{d} ", .{pr.number});
-            try self.visible_pr_numbers.append(self.allocator, number_text);
+            const number_text = try std.fmt.allocPrint(self.allocator, "#{d}", .{pr.number});
+            try self.visible_pr_elements.append(self.allocator, number_text);
 
-            // PR number with cyan style
+            const meta_text = try std.fmt.allocPrint(self.allocator, "@{s}", .{pr.author});
+            try self.visible_pr_elements.append(self.allocator, meta_text);
+
+            const status_badge = try pr_presentation.allocStatusBadge(self.allocator, pr);
+            try self.visible_pr_elements.append(self.allocator, status_badge);
+
+            const lifecycle_badge = try self.allocator.dupe(u8, pr_presentation.lifecycleText(pr));
+            try self.visible_pr_elements.append(self.allocator, lifecycle_badge);
+
+            const review_text = try self.allocator.dupe(u8, pr_presentation.reviewText(pr));
+            try self.visible_pr_elements.append(self.allocator, review_text);
+
             try segments.append(self.allocator, vaxis.Segment{
                 .text = number_text,
                 .style = if (is_selected) theme.selected_row_style else theme.pr_number_style,
             });
 
-            // PR title with white bold style
+            try segments.append(self.allocator, vaxis.Segment{
+                .text = " ",
+                .style = base_style,
+            });
+
+            try segments.append(self.allocator, vaxis.Segment{
+                .text = status_badge,
+                .style = status_style,
+            });
+
+            try segments.append(self.allocator, vaxis.Segment{
+                .text = " ",
+                .style = base_style,
+            });
+
             try segments.append(self.allocator, vaxis.Segment{
                 .text = pr.title,
                 .style = if (is_selected) base_style else theme.pr_title_style,
             });
 
-            // Separator
             try segments.append(self.allocator, vaxis.Segment{
-                .text = " @",
+                .text = " ",
                 .style = base_style,
             });
 
-            // Author with yellow style
             try segments.append(self.allocator, vaxis.Segment{
-                .text = pr.author,
+                .text = meta_text,
                 .style = if (is_selected) base_style else theme.pr_author_style,
             });
 
-            // Add newline for next item (except after last line)
+            try segments.append(self.allocator, vaxis.Segment{
+                .text = " ",
+                .style = base_style,
+            });
+
+            try segments.append(self.allocator, vaxis.Segment{
+                .text = lifecycle_badge,
+                .style = if (is_selected) theme.selected_row_style else pr_presentation.lifecycleStyle(pr),
+            });
+
+            try segments.append(self.allocator, vaxis.Segment{
+                .text = " ",
+                .style = base_style,
+            });
+
+            try segments.append(self.allocator, vaxis.Segment{
+                .text = review_text,
+                .style = muted_style,
+            });
+
             if (i < visible - 1) {
                 try segments.append(self.allocator, vaxis.Segment{
                     .text = "\n",
@@ -261,15 +299,20 @@ pub const PRListScreen = struct {
                 });
             }
         }
-        // Print all segments at once
         _ = body.print(segments.items, .{});
+    }
 
-        // =====================
-        // Footer
-        // =====================
-        _ = footer.print(&.{
-            .{ .text = "j/k: navigate • Enter: open • r: refresh" },
-        }, .{});
+    fn renderHelp(screen: *Screen, window: vaxis.Window) !void {
+        _ = screen;
+        try help_modal.render(window, "Pull Request List", &.{
+            .{ .key = "j", .description = "Move selection down" },
+            .{ .key = "k", .description = "Move selection up" },
+            .{ .key = "enter", .description = "Open the selected pull request" },
+            .{ .key = "r", .description = "Refresh the pull request list" },
+            .{ .key = "q", .description = "Go back or quit from the top-level list" },
+            .{ .key = "ctrl-q", .description = "Quit ghretty" },
+            .{ .key = "?", .description = "Close this help modal" },
+        });
     }
 
     fn fromBase(screen: *Screen) *@This() {
@@ -281,6 +324,7 @@ pub const PRListScreen = struct {
         .handleInput = handleInput,
         .update = update,
         .render = render,
+        .renderHelp = renderHelp,
         .deinit = deinit,
     };
 };
