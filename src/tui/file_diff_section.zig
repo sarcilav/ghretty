@@ -3,6 +3,7 @@ const vaxis = @import("vaxis");
 const git = @import("../models/git.zig");
 const theme = @import("theme.zig");
 const Section = @import("section.zig").Section;
+const HelpContent = @import("section.zig").HelpContent;
 
 // Build a lookup table at comptime
 const diff_styles = theme.diff_line_styles{};
@@ -135,26 +136,11 @@ pub const FileDiffSection = struct {
     fn findLineIndexForHunkHeader(self: *@This(), file_idx: usize, hunk_idx: usize) usize {
         var current_idx: usize = 0;
         for (self.file_diffs.items, 0..) |file_diff, diff_idx| {
-            if (diff_idx == file_idx) {
-                current_idx += 1; // Skip file header
-
-                for (file_diff.hunks.items, 0..) |_, current_hunk_idx| {
-                    if (current_hunk_idx == hunk_idx) {
-                        return current_idx;
-                    }
-                    current_idx += 1; // Skip hunk header
-
-                    // Skip hunk lines if not collapsed
-                    if (!file_diff.hunks.items[current_hunk_idx].collapsed) {
-                        current_idx += file_diff.hunks.items[current_hunk_idx].lines.items.len;
-                    }
-                }
-                break;
-            }
-            current_idx += 1; // Skip file header
-
+            current_idx += 1; //Skip file header
             if (!file_diff.collapsed) {
-                for (file_diff.hunks.items) |hunk| {
+                for (file_diff.hunks.items, 0..) |hunk, current_hunk_idx| {
+                    if (diff_idx == file_idx and current_hunk_idx == hunk_idx)
+                        return current_idx;
                     current_idx += 1; // Skip hunk header
                     if (!hunk.collapsed) {
                         current_idx += hunk.lines.items.len;
@@ -337,10 +323,23 @@ pub const FileDiffSection = struct {
         self.allocator.destroy(self);
     }
 
+    fn helpContent(data: *anyopaque) HelpContent {
+        _ = data;
+        return .{
+            .title = "Files Help",
+            .entries = &.{
+                .{ .key = "j", .description = "Move down" },
+                .{ .key = "k", .description = "Move up" },
+                .{ .key = "tab", .description = "Collapse or expand the current file or hunk" },
+            },
+        };
+    }
+
     const vtable = Section.VTable{
         .handleInput = handleInput,
         .update = update,
         .render = render,
+        .helpContent = helpContent,
         .deinit = deinit,
     };
 };
