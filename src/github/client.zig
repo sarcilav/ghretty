@@ -3,6 +3,7 @@ const PR = @import("../models/pr.zig").PR;
 const PRState = @import("../models/pr.zig").PRState;
 const FileChange = @import("../models/pr.zig").FileChange;
 const PRReviewAction = @import("../models/pr.zig").PRReviewAction;
+const PRMergeAction = @import("../models/pr.zig").PRMergeAction;
 const git = @import("../models/git.zig");
 
 pub const GitHubClient = struct {
@@ -73,6 +74,50 @@ pub const GitHubClient = struct {
                 const review_body = body orelse return error.MissingReviewBody;
                 const result = try self.runGhCommand(&.{ "pr", "review", pr_str, "--comment", "--body", review_body });
                 defer self.allocator.free(result);
+            },
+        }
+    }
+
+    pub fn submitPRMergeAction(
+        self: *@This(),
+        pr_number: u32,
+        action: PRMergeAction,
+        message: ?[]const u8,
+    ) !void {
+        const pr_str = try std.fmt.allocPrint(self.allocator, "{}", .{pr_number});
+        defer self.allocator.free(pr_str);
+
+        switch (action) {
+            .merge_commit => {
+                if (message) |subject| {
+                    const result = try self.runGhCommand(&.{ "pr", "merge", pr_str, "--merge", "--subject", subject });
+                    defer self.allocator.free(result);
+                } else {
+                    const result = try self.runGhCommand(&.{ "pr", "merge", pr_str, "--merge" });
+                    defer self.allocator.free(result);
+                }
+            },
+            .squash => {
+                if (message) |subject| {
+                    const result = try self.runGhCommand(&.{ "pr", "merge", pr_str, "--squash", "--subject", subject });
+                    defer self.allocator.free(result);
+                } else {
+                    const result = try self.runGhCommand(&.{ "pr", "merge", pr_str, "--squash" });
+                    defer self.allocator.free(result);
+                }
+            },
+            .rebase => {
+                const result = try self.runGhCommand(&.{ "pr", "merge", pr_str, "--rebase" });
+                defer self.allocator.free(result);
+            },
+            .close => {
+                if (message) |comment| {
+                    const result = try self.runGhCommand(&.{ "pr", "close", pr_str, "--comment", comment });
+                    defer self.allocator.free(result);
+                } else {
+                    const result = try self.runGhCommand(&.{ "pr", "close", pr_str });
+                    defer self.allocator.free(result);
+                }
             },
         }
     }
