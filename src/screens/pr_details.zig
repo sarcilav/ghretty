@@ -8,8 +8,13 @@ const layout = @import("../tui/layout.zig");
 const pr_presentation = @import("../tui/pr_presentation.zig");
 const theme = @import("../tui/theme.zig");
 const Section = @import("../tui/section.zig").Section;
+const HelpEntry = @import("../tui/section.zig").HelpEntry;
 const FileDiffSection = @import("../tui/file_diff_section.zig").FileDiffSection;
 const PRDescriptionSection = @import("../tui/pr_description_section.zig").PRDescriptionSection;
+const help_modal = @import("../tui/help_modal.zig");
+const review_modal = @import("../tui/review_modal.zig");
+const PRReviewAction = @import("../models/pr.zig").PRReviewAction;
+const TextInput = vaxis.widgets.TextInput;
 
 pub const PRDetailsScreen = struct {
     base: Screen,
@@ -30,6 +35,12 @@ pub const PRDetailsScreen = struct {
     pr_additions_text: ?[]const u8 = null,
     pr_deletions_text: ?[]const u8 = null,
     current_section_type: enum { description, diff } = .description,
+    show_review_modal: bool = false,
+    review_action: PRReviewAction = .approve,
+    review_input: TextInput,
+    review_modal_error: ?[]const u8 = null,
+    flash_message: ?[]const u8 = null,
+    flash_message_is_error: bool = false,
 
     pub fn create(allocator: std.mem.Allocator, pr_number: u32) !*Screen {
         const self = try allocator.create(@This());
@@ -46,6 +57,7 @@ pub const PRDetailsScreen = struct {
             .pr_number = pr_number,
             .file_diffs = file_diffs,
             .current_section_type = .description,
+            .review_input = TextInput.init(allocator),
         };
         return &self.base;
     }
@@ -72,6 +84,9 @@ pub const PRDetailsScreen = struct {
         if (self.pr_file_count_text) |text| self.allocator.free(text);
         if (self.pr_additions_text) |text| self.allocator.free(text);
         if (self.pr_deletions_text) |text| self.allocator.free(text);
+        if (self.flash_message) |message| self.allocator.free(message);
+        if (self.review_modal_error) |message| self.allocator.free(message);
+        self.review_input.deinit();
         if (self.pr) |*pr| pr.deinit(self.allocator);
 
         self.allocator.destroy(self.github_client);
@@ -86,8 +101,17 @@ pub const PRDetailsScreen = struct {
     pub fn handleInput(screen: *Screen, key: vaxis.Key) !void {
         const self = fromBase(screen);
 
+        if (self.show_review_modal) {
+            try self.handleReviewModalInput(key);
+            return;
+        }
+
         // Hotkeys to switch sections
         switch (key.codepoint) {
+            'v' => {
+                self.openReviewModal();
+                return;
+            },
             'd' => {
                 // Switch to description section
                 if (self.current_section_type != .description) {
@@ -269,10 +293,7 @@ pub const PRDetailsScreen = struct {
         var tabs_area = window.child(layout.rect(0, 5, w, 3));
 
         // --- Content ---
-        var content = window.child(layout.rect(0, 8, w, h - 11));
-
-        // --- Footer ---
-        var footer = window.child(layout.rect(0, h - 3, w, 3));
+        var content = window.child(layout.rect(0, 8, w, h - 8));
 
         // Render header in one print call so later lines do not overwrite the title.
         var header_segments = std.ArrayList(vaxis.Segment){};
@@ -346,6 +367,17 @@ pub const PRDetailsScreen = struct {
                     });
                 }
             }
+
+            if (self.flash_message) |message| {
+                try header_segments.append(self.allocator, .{
+                    .text = "\n",
+                    .style = theme.normal_style,
+                });
+                try header_segments.append(self.allocator, .{
+                    .text = message,
+                    .style = if (self.flash_message_is_error) theme.error_style else theme.success_style,
+                });
+            }
         }
 
         if (header_segments.items.len > 0) {
@@ -356,8 +388,8 @@ pub const PRDetailsScreen = struct {
         const desc_active = self.current_section_type == .description;
         const diff_active = self.current_section_type == .diff;
 
-        const desc_tab = if (desc_active) "[d] Description" else " d  Description";
-        const diff_tab = if (diff_active) "[f] Files" else " f  Files";
+        const desc_tab = "Description";
+        const diff_tab = "Files";
 
         _ = tabs_area.print(&.{
             .{ .text = desc_tab, .style = if (desc_active) theme.selected_row_style else theme.normal_style },
@@ -393,14 +425,165 @@ pub const PRDetailsScreen = struct {
             }
         }
 
-        // Footer
-        _ = footer.print(&.{
-            .{ .text = "d: Description • f: Files • r: refresh • q: back • ctrl-q: quit" },
-        }, .{});
+        if (self.show_review_modal) {
+            try review_modal.render(window, &self.review_input, self.review_action, self.review_modal_error);
+        }
+    }
+
+    fn renderHelp(screen: *Screen, window: vaxis.Window) !void {
+        const self = fromBase(screen);
+        var section_title: ?[]const u8 = null;
+
+        var entries = std.ArrayList(HelpEntry){};
+        defer entries.deinit(self.allocator);
+
+        try entries.appendSlice(self.allocator, &.{
+            .{ .key = "d", .description = "Switch to the description view" },
+            .{ .key = "f", .description = "Switch to the files view" },
+            .{ .key = "v", .description = "Open the PR review modal" },
+            .{ .key = "r", .description = "Refresh pull request details" },
+        });
+
+        if (self.current_section) |section| {
+            const section_help = section.helpContent();
+            section_title = section_help.title;
+            try entries.appendSlice(self.allocator, section_help.entries);
+        }
+
+        try entries.appendSlice(self.allocator, &.{
+            .{ .key = "q", .description = "Go back" },
+            .{ .key = "ctrl-q", .description = "Quit ghretty" },
+            .{ .key = "?", .description = "Close this help modal" },
+        });
+
+        const title = section_title orelse switch (self.current_section_type) {
+            .description => "Pull Request Details: Description",
+            .diff => "Pull Request Details: Files",
+        };
+
+        try help_modal.render(window, title, entries.items);
     }
 
     fn fromBase(screen: *Screen) *@This() {
         return @fieldParentPtr("base", screen);
+    }
+
+    fn openReviewModal(self: *@This()) void {
+        self.show_review_modal = true;
+        self.review_action = .approve;
+        self.clearReviewModalError();
+        self.review_input.clearRetainingCapacity();
+    }
+
+    fn closeReviewModal(self: *@This()) void {
+        self.show_review_modal = false;
+        self.clearReviewModalError();
+        self.review_input.clearRetainingCapacity();
+    }
+
+    fn handleReviewModalInput(self: *@This(), key: vaxis.Key) !void {
+        if (key.matches(vaxis.Key.escape, .{}) or key.matches('q', .{})) {
+            self.closeReviewModal();
+            return;
+        }
+
+        if (key.matches(vaxis.Key.tab, .{})) {
+            self.review_action = nextReviewAction(self.review_action);
+            self.clearReviewModalError();
+            return;
+        }
+
+        if (key.matches(vaxis.Key.tab, .{ .shift = true })) {
+            self.review_action = previousReviewAction(self.review_action);
+            self.clearReviewModalError();
+            return;
+        }
+
+        if (key.matches(vaxis.Key.enter, .{ .shift = true })) {
+            try self.submitReviewAction();
+            return;
+        }
+
+        try self.review_input.update(.{ .key_press = key });
+        self.clearReviewModalError();
+    }
+
+    fn submitReviewAction(self: *@This()) !void {
+        const body = try self.allocReviewInputText();
+        defer if (body) |text| self.allocator.free(text);
+
+        if (self.review_action == .comment and (body == null or body.?.len == 0)) {
+            try self.setReviewModalError("A comment is required for comment reviews.");
+            return;
+        }
+
+        self.github_client.submitPRReview(self.pr_number, self.review_action, body) catch |err| {
+            const message = switch (err) {
+                error.MissingReviewBody => "A comment is required for this action.",
+                error.GhCommandFailed => "GitHub CLI command failed while submitting the PR action.",
+                else => "Unable to submit the PR action.",
+            };
+            try self.setReviewModalError(message);
+            return;
+        };
+
+        self.closeReviewModal();
+        try self.setFlashMessage(successMessage(self.review_action), false);
+        self.loading = true;
+    }
+
+    fn allocReviewInputText(self: *@This()) !?[]const u8 {
+        const first_half = self.review_input.buf.firstHalf();
+        const second_half = self.review_input.buf.secondHalf();
+        const len = first_half.len + second_half.len;
+        if (len == 0) return null;
+
+        const buf = try self.allocator.alloc(u8, len);
+        @memcpy(buf[0..first_half.len], first_half);
+        @memcpy(buf[first_half.len..], second_half);
+        return buf;
+    }
+
+    fn setFlashMessage(self: *@This(), message: []const u8, is_error: bool) !void {
+        if (self.flash_message) |current| self.allocator.free(current);
+        self.flash_message = try self.allocator.dupe(u8, message);
+        self.flash_message_is_error = is_error;
+    }
+
+    fn setReviewModalError(self: *@This(), message: []const u8) !void {
+        if (self.review_modal_error) |current| self.allocator.free(current);
+        self.review_modal_error = try self.allocator.dupe(u8, message);
+    }
+
+    fn clearReviewModalError(self: *@This()) void {
+        if (self.review_modal_error) |current| {
+            self.allocator.free(current);
+            self.review_modal_error = null;
+        }
+    }
+
+    fn nextReviewAction(action: PRReviewAction) PRReviewAction {
+        return switch (action) {
+            .approve => .request_changes,
+            .request_changes => .comment,
+            .comment => .approve,
+        };
+    }
+
+    fn previousReviewAction(action: PRReviewAction) PRReviewAction {
+        return switch (action) {
+            .approve => .comment,
+            .request_changes => .approve,
+            .comment => .request_changes,
+        };
+    }
+
+    fn successMessage(action: PRReviewAction) []const u8 {
+        return switch (action) {
+            .approve => "Approval submitted.",
+            .request_changes => "Change request submitted.",
+            .comment => "Comment submitted.",
+        };
     }
 
     const vtable = Screen.VTable{
@@ -408,6 +591,7 @@ pub const PRDetailsScreen = struct {
         .handleInput = handleInput,
         .update = update,
         .render = render,
+        .renderHelp = renderHelp,
         .deinit = deinit,
     };
 };
