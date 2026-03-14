@@ -2,6 +2,7 @@ const std = @import("std");
 const PR = @import("../models/pr.zig").PR;
 const PRState = @import("../models/pr.zig").PRState;
 const FileChange = @import("../models/pr.zig").FileChange;
+const PRReviewAction = @import("../models/pr.zig").PRReviewAction;
 const git = @import("../models/git.zig");
 
 pub const GitHubClient = struct {
@@ -38,6 +39,42 @@ pub const GitHubClient = struct {
         defer self.allocator.free(raw_diff);
 
         return try self.parsePRDiff(raw_diff);
+    }
+
+    pub fn submitPRReview(
+        self: *@This(),
+        pr_number: u32,
+        action: PRReviewAction,
+        body: ?[]const u8,
+    ) !void {
+        const pr_str = try std.fmt.allocPrint(self.allocator, "{}", .{pr_number});
+        defer self.allocator.free(pr_str);
+
+        switch (action) {
+            .approve => {
+                if (body) |review_body| {
+                    const result = try self.runGhCommand(&.{ "pr", "review", pr_str, "--approve", "--body", review_body });
+                    defer self.allocator.free(result);
+                } else {
+                    const result = try self.runGhCommand(&.{ "pr", "review", pr_str, "--approve" });
+                    defer self.allocator.free(result);
+                }
+            },
+            .request_changes => {
+                if (body) |review_body| {
+                    const result = try self.runGhCommand(&.{ "pr", "review", pr_str, "--request-changes", "--body", review_body });
+                    defer self.allocator.free(result);
+                } else {
+                    const result = try self.runGhCommand(&.{ "pr", "review", pr_str, "--request-changes" });
+                    defer self.allocator.free(result);
+                }
+            },
+            .comment => {
+                const review_body = body orelse return error.MissingReviewBody;
+                const result = try self.runGhCommand(&.{ "pr", "review", pr_str, "--comment", "--body", review_body });
+                defer self.allocator.free(result);
+            },
+        }
     }
 
     fn runGhCommand(self: *@This(), args: []const []const u8) ![]const u8 {
@@ -124,10 +161,10 @@ pub const GitHubClient = struct {
                     }
 
                     // Determine file operation from collected lines
-                    file.operation = git.parseFileOperation(current_file_lines.items); // NEW
+                    file.operation = git.parseFileOperation(current_file_lines.items);
                     try file_diffs.append(self.allocator, file.*);
                     current_file = null;
-                    current_file_lines.clearRetainingCapacity(); // NEW: clear for next file
+                    current_file_lines.clearRetainingCapacity();
                 }
 
                 // Extract filename from "diff --git a/path/to/file b/path/to/file"
@@ -190,7 +227,7 @@ pub const GitHubClient = struct {
         }
         if (current_file) |*file| {
             // Determine operation for the last file
-            file.operation = git.parseFileOperation(current_file_lines.items); // NEW
+            file.operation = git.parseFileOperation(current_file_lines.items);
             try file_diffs.append(self.allocator, file.*);
         }
 
