@@ -3,6 +3,7 @@ const vaxis = @import("vaxis");
 const git = @import("../models/git.zig");
 const theme = @import("theme.zig");
 const Section = @import("section.zig").Section;
+const HelpContent = @import("section.zig").HelpContent;
 
 // Build a lookup table at comptime
 const diff_styles = theme.diff_line_styles{};
@@ -322,10 +323,23 @@ pub const FileDiffSection = struct {
         self.allocator.destroy(self);
     }
 
+    fn helpContent(data: *anyopaque) HelpContent {
+        _ = data;
+        return .{
+            .title = "Files Help",
+            .entries = &.{
+                .{ .key = "j", .description = "Move down" },
+                .{ .key = "k", .description = "Move up" },
+                .{ .key = "tab", .description = "Collapse or expand the current file or hunk" },
+            },
+        };
+    }
+
     const vtable = Section.VTable{
         .handleInput = handleInput,
         .update = update,
         .render = render,
+        .helpContent = helpContent,
         .deinit = deinit,
     };
 };
