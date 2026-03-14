@@ -11,5 +11,9 @@ pub fn rect(
         .y_off = y,
         .width = w,
         .height = h,
+        .border = .{
+            .where = .all,
+            //.style = .{ .all }
+        },
     };
 }
