@@ -355,8 +355,8 @@ pub const PRDetailsScreen = struct {
         const desc_active = self.current_section_type == .description;
         const diff_active = self.current_section_type == .diff;
 
-        const desc_tab = if (desc_active) "[d] Description" else " d  Description";
-        const diff_tab = if (diff_active) "[f] Files" else " f  Files";
+        const desc_tab = "Description";
+        const diff_tab = "Files";
 
         _ = tabs_area.print(&.{
             .{ .text = desc_tab, .style = if (desc_active) theme.selected_row_style else theme.normal_style },
