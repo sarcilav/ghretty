@@ -6,6 +6,12 @@ pub const PRState = enum {
     merged,
 };
 
+pub const PRReviewAction = enum {
+    approve,
+    request_changes,
+    comment,
+};
+
 pub const PR = struct {
     number: u32,
     title: []const u8,
