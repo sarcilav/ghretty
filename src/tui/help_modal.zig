@@ -4,10 +4,6 @@ const theme = @import("theme.zig");
 const HelpEntry = @import("section.zig").HelpEntry;
 
 pub fn render(window: vaxis.Window, title: []const u8, entries: []const HelpEntry) !void {
-    var buf: [4096]u8 = undefined;
-    var fba = std.heap.FixedBufferAllocator.init(&buf);
-    const allocator = fba.allocator();
-
     const content_width = computeContentWidth(title, entries);
     const modal_width = @min(window.width -| 4, @max(@as(u16, 36), content_width + 6));
     const modal_height = @min(window.height -| 2, @as(u16, @intCast(entries.len + 5)));
@@ -23,41 +19,30 @@ pub fn render(window: vaxis.Window, title: []const u8, entries: []const HelpEntr
     });
     modal.clear();
 
-    var segments = std.ArrayList(vaxis.Segment){};
-    defer segments.deinit(allocator);
-
-    try segments.append(allocator, .{
-        .text = title,
-        .style = theme.header_style,
-    });
-    try segments.append(allocator, .{
-        .text = "\n",
-        .style = theme.normal_style,
-    });
+    _ = modal.print(&.{
+        .{
+            .text = title,
+            .style = theme.header_style,
+        },
+        .{
+            .text = "\n",
+            .style = theme.normal_style,
+        },
+    }, .{});
 
     for (entries, 0..) |entry, idx| {
-        try segments.append(allocator, .{
-            .text = padKey(entry.key),
-            .style = theme.selected_row_style,
+        var row = modal.child(.{
+            .x_off = 1,
+            .y_off = @intCast(idx + 2),
+            .width = modal_width -| 2,
+            .height = 1,
         });
-        try segments.append(allocator, .{
-            .text = "  ",
-            .style = theme.normal_style,
-        });
-        try segments.append(allocator, .{
-            .text = entry.description,
-            .style = theme.normal_style,
-        });
-
-        if (idx + 1 < entries.len) {
-            try segments.append(allocator, .{
-                .text = "\n",
-                .style = theme.normal_style,
-            });
-        }
+        _ = row.print(&.{
+            .{ .text = padKey(entry.key), .style = theme.selected_row_style },
+            .{ .text = "  ", .style = theme.normal_style },
+            .{ .text = entry.description, .style = theme.normal_style },
+        }, .{});
     }
-
-    _ = modal.print(segments.items, .{});
 }
 
 fn computeContentWidth(title: []const u8, entries: []const HelpEntry) u16 {
