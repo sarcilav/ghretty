@@ -44,6 +44,18 @@ fn getFileOperationStyle(operation: git.FileOperation) vaxis.Style {
 }
 
 pub const FileDiffSection = struct {
+    const LineInfo = struct {
+        text: []const u8,
+        kind: ?git.DiffLineKind,
+        file_diff_idx: ?usize = null,
+        hunk_idx: ?usize = null,
+    };
+
+    const StickyLine = struct {
+        line_index: usize,
+        line_info: LineInfo,
+    };
+
     base: Section,
     allocator: std.mem.Allocator,
     file_diffs: std.ArrayList(git.FileDiff),
@@ -79,12 +91,7 @@ pub const FileDiffSection = struct {
         return total;
     }
 
-    fn getLineInfo(self: *@This(), index: usize) struct {
-        text: []const u8,
-        kind: ?git.DiffLineKind,
-        file_diff_idx: ?usize = 0,
-        hunk_idx: ?usize = null,
-    } {
+    fn getLineInfo(self: *@This(), index: usize) LineInfo {
         var current_idx: usize = 0;
         for (self.file_diffs.items, 0..) |file_diff, diff_idx| {
             if (current_idx == index) {
@@ -133,6 +140,24 @@ pub const FileDiffSection = struct {
         };
     }
 
+    fn findLineIndexForFileHeader(self: *@This(), file_idx: usize) usize {
+        var current_idx: usize = 0;
+        for (self.file_diffs.items, 0..) |file_diff, diff_idx| {
+            if (diff_idx == file_idx) return current_idx;
+
+            current_idx += 1; // Skip file header
+            if (!file_diff.collapsed) {
+                for (file_diff.hunks.items) |hunk| {
+                    current_idx += 1; // Skip hunk header
+                    if (!hunk.collapsed) {
+                        current_idx += hunk.lines.items.len;
+                    }
+                }
+            }
+        }
+        return 0;
+    }
+
     fn findLineIndexForHunkHeader(self: *@This(), file_idx: usize, hunk_idx: usize) usize {
         var current_idx: usize = 0;
         for (self.file_diffs.items, 0..) |file_diff, diff_idx| {
@@ -152,26 +177,134 @@ pub const FileDiffSection = struct {
     }
 
     fn adjustScrollOffsetForSelected(self: *@This(), total_lines: usize) void {
-        // Ensure selected index is within bounds
+        if (total_lines == 0 or self.visible_area == 0) {
+            self.selected_index = 0;
+            self.scroll_offset = 0;
+            return;
+        }
+
         if (self.selected_index >= total_lines) {
-            self.selected_index = if (total_lines > 0) total_lines - 1 else 0;
+            self.selected_index = total_lines - 1;
         }
 
-        // Adjust scroll offset to make selected item visible
         if (self.selected_index < self.scroll_offset) {
-            // Selected item is above visible area
             self.scroll_offset = self.selected_index;
-        } else if (self.selected_index >= self.scroll_offset + self.visible_area) {
-            // Selected item is below visible area
-            self.scroll_offset = self.selected_index - self.visible_area + 1;
         }
 
-        // Ensure scroll offset is valid
-        if (self.scroll_offset + self.visible_area > total_lines) {
-            if (total_lines > self.visible_area) {
-                self.scroll_offset = total_lines - self.visible_area;
-            } else {
-                self.scroll_offset = 0;
+        while (true) {
+            const sticky_lines = self.getStickyLines(self.scroll_offset).len;
+            const available_lines = self.getAvailableContentLines(sticky_lines);
+
+            if (self.selected_index < self.scroll_offset) {
+                self.scroll_offset = self.selected_index;
+                continue;
+            }
+
+            if (self.selected_index >= self.scroll_offset + available_lines) {
+                self.scroll_offset = self.selected_index - available_lines + 1;
+                continue;
+            }
+
+            break;
+        }
+
+        if (self.scroll_offset >= total_lines) {
+            self.scroll_offset = total_lines - 1;
+        }
+    }
+
+    fn getAvailableContentLines(self: *@This(), sticky_lines: usize) usize {
+        if (self.visible_area == 0) return 0;
+        return @max(@as(usize, 1), self.visible_area - @min(sticky_lines, self.visible_area - 1));
+    }
+
+    fn getStickyLines(self: *@This(), top_index: usize) []const StickyLine {
+        var sticky_lines: [2]StickyLine = undefined;
+
+        if (top_index >= self.getTotalDisplayLines()) return sticky_lines[0..0];
+
+        const top_line = self.getLineInfo(top_index);
+        if (top_line.kind == null or top_line.file_diff_idx == null) return sticky_lines[0..0];
+
+        switch (top_line.kind.?) {
+            .file_header => return sticky_lines[0..0],
+            .hunk_header => {
+                const file_header_idx = self.findLineIndexForFileHeader(top_line.file_diff_idx.?);
+                sticky_lines[0] = .{
+                    .line_index = file_header_idx,
+                    .line_info = self.getLineInfo(file_header_idx),
+                };
+                return sticky_lines[0..1];
+            },
+            else => {
+                if (top_line.hunk_idx) |hunk_idx| {
+                    const file_header_idx = self.findLineIndexForFileHeader(top_line.file_diff_idx.?);
+                    const hunk_header_idx = self.findLineIndexForHunkHeader(top_line.file_diff_idx.?, hunk_idx);
+                    sticky_lines[0] = .{
+                        .line_index = file_header_idx,
+                        .line_info = self.getLineInfo(file_header_idx),
+                    };
+                    sticky_lines[1] = .{
+                        .line_index = hunk_header_idx,
+                        .line_info = self.getLineInfo(hunk_header_idx),
+                    };
+                    return sticky_lines[0..2];
+                }
+
+                return sticky_lines[0..0];
+            },
+        }
+    }
+
+    fn appendRenderedLine(
+        self: *@This(),
+        segments: *std.ArrayList(vaxis.Segment),
+        line_index: usize,
+        line_info: LineInfo,
+        add_newline: bool,
+    ) !void {
+        const is_selected = line_index == self.selected_index;
+
+        if (line_info.kind) |kind| {
+            const style = if (is_selected)
+                theme.selected_row_style
+            else
+                getDiffStyle(kind);
+
+            if (line_info.file_diff_idx) |file_idx| {
+                const file_diff = self.file_diffs.items[file_idx];
+                if (kind == .hunk_header) {
+                    if (line_info.hunk_idx) |hunk_idx| {
+                        try segments.append(self.allocator, vaxis.Segment{
+                            .text = "  ",
+                            .style = style,
+                        });
+                        const hunk = file_diff.hunks.items[hunk_idx];
+                        try segments.append(self.allocator, vaxis.Segment{
+                            .text = getCollapsableSymbol(hunk.collapsed),
+                            .style = style,
+                        });
+                    }
+                } else if (kind == .file_header) {
+                    try segments.append(self.allocator, vaxis.Segment{
+                        .text = getCollapsableSymbol(file_diff.collapsed),
+                        .style = style,
+                    });
+
+                    try segments.append(self.allocator, vaxis.Segment{
+                        .text = getFileOperationSymbol(file_diff.operation),
+                        .style = getFileOperationStyle(file_diff.operation),
+                    });
+                }
+            }
+
+            try segments.append(self.allocator, vaxis.Segment{
+                .text = line_info.text,
+                .style = style,
+            });
+
+            if (add_newline) {
+                try segments.append(self.allocator, .{ .text = "\n", .style = theme.normal_style });
             }
         }
     }
@@ -250,65 +383,32 @@ pub const FileDiffSection = struct {
         defer segments.deinit(self.allocator);
 
         const total_lines = self.getTotalDisplayLines();
+        const sticky_lines = self.getStickyLines(self.scroll_offset);
+        const reserved_sticky_lines = @min(sticky_lines.len, self.visible_area -| 1);
         const visible = @min(
             total_lines -| self.scroll_offset,
-            self.visible_area,
+            self.getAvailableContentLines(reserved_sticky_lines),
         );
+        const total_rendered_lines = reserved_sticky_lines + visible;
+
+        for (sticky_lines[0..reserved_sticky_lines], 0..) |sticky_line, i| {
+            try self.appendRenderedLine(
+                &segments,
+                sticky_line.line_index,
+                sticky_line.line_info,
+                i + 1 < total_rendered_lines,
+            );
+        }
 
         for (0..visible) |i| {
             const idx = self.scroll_offset + i;
             const line_info = self.getLineInfo(idx);
-            const is_selected = idx == self.selected_index;
-
-            if (line_info.kind) |kind| {
-                const style = if (is_selected)
-                    theme.selected_row_style
-                else
-                    getDiffStyle(kind);
-
-                if (line_info.file_diff_idx) |file_idx| {
-                    const file_diff = self.file_diffs.items[file_idx];
-                    if (kind == .hunk_header) {
-                        if (line_info.hunk_idx) |hunk_idx| {
-                            try segments.append(self.allocator, vaxis.Segment{
-                                .text = "  ", // doble space to make it look nested
-                                .style = style,
-                            });
-                            const hunk = file_diff.hunks.items[hunk_idx];
-                            try segments.append(self.allocator, vaxis.Segment{
-                                .text = getCollapsableSymbol(hunk.collapsed),
-                                .style = style,
-                            });
-                        }
-                    } else if (kind == .file_header) {
-                        try segments.append(self.allocator, vaxis.Segment{
-                            .text = getCollapsableSymbol(file_diff.collapsed),
-                            .style = style,
-                        });
-
-                        try segments.append(self.allocator, vaxis.Segment{
-                            .text = getFileOperationSymbol(file_diff.operation),
-                            .style = getFileOperationStyle(file_diff.operation),
-                        });
-                    } // not sure if we should add the diff as nested as well, it makes the review weird
-                    //  else {
-                    //     try segments.append(self.allocator, vaxis.Segment{
-                    //         .text = "    ", // 2xdoble space to make it look nested
-                    //         .style = style,
-                    //     });
-                    // }
-                }
-
-                try segments.append(self.allocator, vaxis.Segment{
-                    .text = line_info.text,
-                    .style = style,
-                });
-
-                // Add newline segment (except after last line)
-                if (i < visible - 1) {
-                    try segments.append(self.allocator, .{ .text = "\n", .style = theme.normal_style });
-                }
-            }
+            try self.appendRenderedLine(
+                &segments,
+                idx,
+                line_info,
+                reserved_sticky_lines + i + 1 < total_rendered_lines,
+            );
         }
 
         _ = window.print(segments.items, .{});
